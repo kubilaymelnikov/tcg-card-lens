@@ -162,17 +162,55 @@ void OverlayDrawer::draw(uint32_t w, uint32_t h, const OverlayStyle &style)
 		float x0, y0, x1, y1;
 	};
 	std::vector<Rect> placed;
-	auto place = [&](float x, float y, float pw, float ph, int dir) {
+	// Umrisse aller Karten (Achsen-Box): Tafeln sollen nicht in fremde Karten ragen (Sammelmappe, Kartenraster)
+	std::vector<std::pair<int, Rect>> cards;
+	for (const auto &kv : tracks_) {
+		Rect r{1e9f, 1e9f, -1e9f, -1e9f};
+		for (int i = 0; i < 4; i++) {
+			r.x0 = std::min(r.x0, kv.second.display[i * 2]);
+			r.x1 = std::max(r.x1, kv.second.display[i * 2]);
+			r.y0 = std::min(r.y0, kv.second.display[i * 2 + 1]);
+			r.y1 = std::max(r.y1, kv.second.display[i * 2 + 1]);
+		}
+		cards.push_back({kv.first, r});
+	}
+	// dir > 0: Tafel unter der Karte (Preis), dir < 0: über der Karte (Name). `own` = eigene Karte.
+	// Ragt die Tafel in eine fremde Karte, rutscht sie auf die eigene Karte (Preis nach oben, Name nach unten) –
+	// wie am Bildrand; weiter als bis zur gegenüberliegenden Kante der eigenen Karte aber nicht.
+	auto place = [&](float x, float y, float pw, float ph, int dir, int own_id, const Rect &own) {
 		x = std::clamp(x, 0.f, std::max(0.f, float(w) - pw));
-		y = std::clamp(y, 0.f, std::max(0.f, float(h) - ph));
+		const float y_min = dir > 0 ? own.y0 : 0.f;               // Preis höchstens bis zur Oberkante der Karte
+		const float y_max = dir < 0 ? own.y1 - ph : float(h) - ph; // Name höchstens bis zur Unterkante
+		auto clamp_y = [&](float v) { return std::clamp(v, std::min(y_min, y_max), std::max(0.f, y_max)); };
+		y = clamp_y(std::clamp(y, 0.f, std::max(0.f, float(h) - ph)));
+		const float m = 3.f; // kleine Toleranz: Berührung zählt nicht als Überlappung
 		for (int i = 0; i < 20; i++) {
+			bool moved = false;
+			for (const auto &c : cards) {
+				if (c.first == own_id)
+					continue;
+				const Rect &r = c.second;
+				if (x < r.x1 - m && x + pw > r.x0 + m && y < r.y1 - m && y + ph > r.y0 + m) {
+					const float ny = clamp_y(dir > 0 ? r.y0 - ph - 4.f : r.y1 + 4.f);
+					if (std::abs(ny - y) > 0.5f) {
+						y = ny;
+						moved = true;
+					}
+				}
+			}
 			auto hit = std::find_if(placed.begin(), placed.end(), [&](const Rect &r) {
 				return x < r.x1 && x + pw > r.x0 && y < r.y1 && y + ph > r.y0;
 			});
-			if (hit == placed.end())
+			if (hit != placed.end()) {
+				// andere Tafel im Weg: wie bisher in Leserichtung weiterschieben
+				const float ny = std::clamp(dir > 0 ? hit->y1 + 4.f : hit->y0 - ph - 4.f, 0.f, std::max(0.f, float(h) - ph));
+				if (std::abs(ny - y) > 0.5f) {
+					y = ny;
+					moved = true;
+				}
+			}
+			if (!moved)
 				break;
-			y = dir > 0 ? hit->y1 + 4.f : hit->y0 - ph - 4.f;
-			y = std::clamp(y, 0.f, std::max(0.f, float(h) - ph));
 		}
 		placed.push_back({x, y, x + pw, y + ph});
 		return std::pair<float, float>(x, y);
@@ -223,7 +261,8 @@ void OverlayDrawer::draw(uint32_t w, uint32_t h, const OverlayStyle &style)
 				continue;
 			}
 			const bool is_top = p.anchor == "top";
-			auto pos = place(cx - pw / 2, is_top ? top - ph - 6 : bottom + 8, pw, ph, is_top ? -1 : 1);
+			const Rect own{cx - pw / 2, top, cx + pw / 2, bottom};
+			auto pos = place(cx - pw / 2, is_top ? top - ph - 6 : bottom + 8, pw, ph, is_top ? -1 : 1, kv.first, own);
 			draw_texture(it->second, pos.first, pos.second, panel_scale_);
 		}
 	}
