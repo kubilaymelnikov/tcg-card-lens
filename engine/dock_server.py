@@ -386,6 +386,16 @@ def _handler(api: DockApi):
                             return self._send(200, f.read(), "image/jpeg", {"Cache-Control": "max-age=86400"})
                     rec = api._record(card_key(game, cid))
                     if rec is not None and rec.image_url:
+                        # Ohne lokale Bildersammlung (Datenpakete enthalten keine Bilder): einmal laden und behalten
+                        from cardengine.card_database.build import _download
+
+                        try:
+                            _download(rec)
+                        except Exception as err:
+                            print(f"[dock] Bild {game}/{cid} nicht geladen: {err}")
+                        if os.path.exists(path):
+                            with open(path, "rb") as f:
+                                return self._send(200, f.read(), "image/jpeg", {"Cache-Control": "max-age=86400"})
                         self.send_response(302)
                         self.send_header("Location", rec.image_url)
                         self.end_headers()
