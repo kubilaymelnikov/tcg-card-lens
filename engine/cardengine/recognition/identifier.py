@@ -77,12 +77,13 @@ class CardIdentifier:
         self.learned = learned  # gelernte Referenzen/Negativbeispiele aus Bestätigungen (optional)
 
     @classmethod
-    def load_default(cls) -> "CardIdentifier":
+    def load_default(cls, games: list[str] | None = None) -> "CardIdentifier":
+        """`games`: Spiele, deren Index geladen wird (Standard: alle vorhandenen Spieldateien)."""
         from .embedder import Embedder
         from .ocr import FooterOcr
 
         embedder = Embedder()
-        return cls(EmbeddingIndex.load(embedder.index_name), Catalog(), embedder, FooterOcr())
+        return cls(EmbeddingIndex.load(embedder.index_name, games=games), Catalog(), embedder, FooterOcr())
 
     def _record(self, key: str) -> CardRecord | None:
         game, cid = key.split("|", 1)
