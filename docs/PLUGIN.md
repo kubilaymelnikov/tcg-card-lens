@@ -95,3 +95,22 @@ Nachtraining (Detektor, Schwellen).
 3. Magic-Index nach Abschluss des Bild-Downloads neu bauen.
 4. Rücklesen ohne GPU-Stall (Ring aus Stagesurfaces) – erst messen, dann optimieren.
 5. Installer (Plugin + Engine + Modelle) und Engine-Autostart als Standard.
+
+## Ruhiges Tracking (2026-10-17)
+
+| Maßnahme | Wirkung (Messung `tools/eval_stability.py`, Standbild mit Sensorrauschen) |
+|---|---|
+| Positions-Lock bei ruhendem Kartenbereich (Bewegung je Karte aus Differenzbild), 20 Detektionen per Median gemittelt, danach fix | Zittern 2,25 px → **0,00 px** nach ~2–3 s Einschwingen |
+| Subpixel-Kantenanpassung (erste deutliche Kante von außen) | perspektivisch exakter Rahmen, auch bei dunklem Kartenrand |
+| Anzeige gleitet auf die feste Position | größter Sprung 8,2 px → 1,5 px (einmalig beim Einschwingen) |
+| „Keine Karte“-Gedächtnis für Fehlalarme (Spielmatte, Monitor) | keine Endlosversuche; erneute Prüfung erst bei Bewegung an der Stelle |
+| Adaptive Detektionsrate | ruhige Szene + alle Karten fixiert → 1 Hz statt 8 Hz (live in OBS bestätigt) |
+
+## Installer
+
+`installer/build-installer.ps1` baut `TCGCardLens-Setup-<version>.exe` (Inno Setup, ~3 MB): Plugin nach
+`%ProgramData%\obs-studio\plugins`, Engine nach `%LOCALAPPDATA%\TCGCardLens`, danach `setup-engine.ps1`
+(Python 3.12, PyTorch CUDA/CPU, Pakete, Modelle, Grunddaten). Magic-Bilder und neue Sets ergänzt die Engine im
+Hintergrund (`cardengine/maintenance.py`). Engine-Autostart ist im Filter standardmäßig aktiv (ohne Fenster,
+Log: `engine\data\engine.log`, beendet sich nach 15 min ohne OBS).
+Hinweis: PowerShell-Skripte müssen als UTF-8 **mit BOM** gespeichert sein (Windows PowerShell 5.1).
