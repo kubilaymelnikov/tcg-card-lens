@@ -10,6 +10,7 @@ import os
 import threading
 import time
 import traceback
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlparse
 
@@ -26,6 +27,10 @@ CM_GAME = {"pokemon": "Pokemon", "mtg": "Magic"}
 CM_LANGS = {"de", "en", "fr", "it", "es"}
 CROP_SIZE = (244, 340)
 HIGHLIGHT_S = 3.0
+INSTANCE = uuid.uuid4().hex[:12]  # je Engine-Start neu: das Dock verwirft dann alte Kacheln
+ASK_GONE_S = 20.0  # gestellte Frage bleibt so lange stehen, wenn die Karte nicht mehr erkannt wird
+ASK_MIN_SHOWN_S = 2.0  # kürzer gezeigte Fragen bleiben nicht als „nicht im Bild“ stehen
+ASK_RELEASE_S = 10.0  # so lange muss eine gefragte Karte sicher erkannt sein, bevor die Frage von selbst endet
 
 
 def card_key(game: str, card_id: str) -> str:
@@ -37,6 +42,10 @@ class DockApi:
 
     def __init__(self, shared):
         self.shared = shared
+        # Gestellte Fragen (Sitzung, Track) -> {"card": letzter Inhalt, "seen": Zeit, "certain_since": Zeit|None}.
+        # Eine Frage verschwindet nicht, nur weil die Karte kurz neu geprüft wird oder aus dem Bild ist.
+        self._asked: dict[tuple[str, int], dict] = {}
+        self._asked_lock = threading.Lock()
 
     # ---------------------------------------------------------------- Hilfen
     @property
@@ -75,7 +84,7 @@ class DockApi:
         rec = self._record(key)
         if rec is None:
             return None
-        return {"key": key, "name": self.shared.names.name(rec, lang), "set_name": rec.set_name,
+        return {"key": key, "name": self.shared.names.name_nowait(rec, lang), "set_name": rec.set_name,
                 "set_code": rec.set_code, "number": rec.printed_number,
                 "similarity": None if sim is None else round(float(sim), 3), "image": self._image_url(key)}
 
@@ -88,10 +97,62 @@ class DockApi:
             if sess.pipeline is None:
                 sessions.append({"id": sess.sid, "source": sess.source, "highlight": None, "cards": []})
                 continue
-            cards = [c for t in list(sess.pipeline.tracker.tracks) if (c := self._card(sess, t)) is not None]
+            cards = self._sticky_cards(sess)
             cards.sort(key=lambda c: (len(c["label"]), c["label"]))
             sessions.append({"id": sess.sid, "source": sess.source, "highlight": sess.current_highlight(), "cards": cards})
-        return {"engine": __version__, "status": self.shared.status, "learned": learned, "sessions": sessions}
+        try:
+            rev = str(int(os.path.getmtime(DOCK_HTML)))
+        except OSError:
+            rev = None
+        return {"engine": __version__, "status": self.shared.status, "learned": learned, "sessions": sessions,
+                "dock_rev": rev, "instance": INSTANCE}
+
+    def _sticky_cards(self, sess) -> list[dict]:
+        now = time.time()
+        out, alive = [], set()
+        with self._asked_lock:
+            for t in list(sess.pipeline.tracker.tracks):
+                k = (sess.sid, t.id)
+                alive.add(k)
+                c = self._card(sess, t)
+                asked = self._asked.get(k)
+                if t.hidden:
+                    self._asked.pop(k, None)
+                    continue
+                if t.user_rejected or t.confirmed:
+                    self._asked.pop(k, None)
+                elif c is not None and c["needs_confirmation"]:
+                    first = asked["first"] if asked else now
+                    self._asked[k] = {"card": c, "seen": now, "certain_since": None, "first": first}
+                    c["sticky"] = True
+                elif asked is not None:
+                    asked["seen"] = now
+                    if c is None:  # wird gerade neu geprüft (oder automatisch verworfen): letzte Frage zeigen
+                        c = dict(asked["card"], recheck=True, sticky=True, state=t.state)
+                    elif c["uncertain"]:  # weiterhin unsicher (z. B. gerade bewegt): Frage bleibt offen
+                        c = dict(c, needs_confirmation=True, sticky=True)
+                        asked["card"] = c
+                    else:  # inzwischen sicher erkannt: Frage noch kurz offen lassen, dann von selbst beenden
+                        asked["certain_since"] = asked["certain_since"] or now
+                        if now - asked["certain_since"] < ASK_RELEASE_S:
+                            c["sticky"] = True
+                        else:
+                            self._asked.pop(k, None)
+                if c is not None:
+                    out.append(c)
+            # Karten, die gerade gar nicht erkannt werden: Frage noch eine Weile stehen lassen
+            for k, asked in list(self._asked.items()):
+                if k[0] != sess.sid or k in alive:
+                    continue
+                if now - asked["seen"] > ASK_GONE_S or asked["seen"] - asked["first"] < ASK_MIN_SHOWN_S:
+                    del self._asked[k]  # lange weg – oder nur kurz aufgeblitzt (z. B. beim Verschieben)
+                else:
+                    out.append(dict(asked["card"], recheck=True, sticky=True, gone=True))
+        return out
+
+    def _resolve(self, sid: str, track_id) -> None:
+        with self._asked_lock:
+            self._asked.pop((sid, int(track_id)), None)
 
     def _card(self, sess, t) -> dict | None:
         ident = t.identity
@@ -102,7 +163,10 @@ class DockApi:
         crop_v = sum(t.unlocks.values()) * 1000 + (0 if t.finalized else int(time.time() // 2) % 1000)
         card = {
             "label": label, "track": t.id, "state": t.state, "confirmed": bool(t.confirmed),
-            "needs_confirmation": not t.confirmed and (ident is None or not ident.certain),
+            "uncertain": not t.confirmed and (ident is None or not ident.certain),
+            # Gefragt wird erst, wenn die Karte ruhig liegt (nicht beim Verschieben oder in der Hand)
+            "needs_confirmation": not t.confirmed and (ident is None or not ident.certain)
+                                  and (t.locked or t.still_frames >= 15),
             "game": ident.game if ident else t.game, "key": None, "name": "Unbekannte Karte",
             "set_name": None, "set_code": None, "number": None, "similarity": None,
             "method": None, "reason": "nicht erkannt" if ident is None else ident.reason,
@@ -167,7 +231,7 @@ class DockApi:
         t = self._track(sess, track_id)
         rec = self._record(key)
         if t is None:
-            return {"ok": False, "error": "Karte nicht mehr im Bild"}
+            return {"ok": False, "error": "Karte gerade nicht im Bild – kurz warten oder Karte ruhig hinlegen"}
         if rec is None:
             return {"ok": False, "error": "Karte nicht im Katalog"}
         old = t.identity
@@ -190,13 +254,15 @@ class DockApi:
                 print(f"[dock] Preis für {key} fehlgeschlagen: {err}")
         sess._localize(identity)
         sess.pipeline.confirm(t.id, identity)
+        self._resolve(sid, t.id)
         return {"ok": True}
 
     def reject(self, sid: str, track_id) -> dict:
         sess = self._session(sid)
         t = self._track(sess, track_id)
-        if t is None:
-            return {"ok": False, "error": "Karte nicht mehr im Bild"}
+        if t is None:  # Karte nicht mehr im Bild: nur die offene Frage schließen
+            self._resolve(sid, track_id)
+            return {"ok": True}
         if self.shared.learned is not None:
             try:
                 emb, rect, _ = self._view(sess, t, None)
@@ -208,6 +274,15 @@ class DockApi:
             except Exception as err:
                 print(f"[dock] Negativbeispiel nicht gespeichert: {err}")
         sess.pipeline.reject(t.id)
+        self._resolve(sid, t.id)
+        return {"ok": True}
+
+    def dismiss(self, sid: str, track_id) -> dict:
+        sess = self._session(sid)
+        t = self._track(sess, track_id)
+        self._resolve(sid, track_id)
+        if t is not None:
+            sess.pipeline.dismiss(t.id)
         return {"ok": True}
 
     def refresh(self, sid: str, track_id) -> dict:
@@ -319,6 +394,8 @@ def _handler(api: DockApi):
                     return self._json(api.confirm(body["session"], body["track"], body["key"]))
                 if path == "/api/reject":
                     return self._json(api.reject(body["session"], body["track"]))
+                if path == "/api/dismiss":
+                    return self._json(api.dismiss(body["session"], body["track"]))
                 if path == "/api/refresh":
                     return self._json(api.refresh(body["session"], body["track"]))
                 if path == "/api/highlight":

@@ -27,6 +27,7 @@ Polling alle ~500 ms. Antwort:
   "engine": "0.2.0",
   "status": "bereit",
   "learned": {"references": 12, "negatives": 3, "dataset": 15},
+  "dock_rev": "1792233686",             // ändert sich mit dock.html → Dock lädt sich selbst neu
   "sessions": [
     {
       "id": "s1",                       // Sitzungs-ID (eine je OBS-Filterinstanz)
@@ -51,6 +52,10 @@ Polling alle ~500 ms. Antwort:
           "cardmarket_url": "https://www.cardmarket.com/de/Pokemon/Products?idProduct=123456",
           "price": {"value": 0.42, "currency": "EUR", "variant": "normal", "change_30d": -3.1,
                     "updated": "2026-10-17T02:44:00Z"},   // null, wenn kein (sicherer) Preis
+          "sticky": true,               // Engine hält die Frage offen (bis Antwort, 20 s nicht im Bild
+                                        // oder 10 s sicher erkannt)
+          "recheck": false,             // Karte wird gerade neu geprüft – letzter Inhalt wird gezeigt
+          "gone": false,                // Karte gerade nicht im Bild (Frage bleibt noch stehen)
           "candidates": [               // Alternativen, beste zuerst (max. 8, ohne die gewählte Karte)
             {"key": "pokemon|sv3pt5-173", "name": "Pikachu", "set_name": "151", "number": "173/165",
              "similarity": 0.79, "image": "/api/card-image/pokemon/sv3pt5-173"}
@@ -68,6 +73,7 @@ Polling alle ~500 ms. Antwort:
 |---|---|---|
 | `/api/confirm` | `{"session","track","key"}` | Karte bestätigen (`key` = vorgeschlagene oder Alternative). Track wird fixiert, Preis sicher angezeigt, Referenz gelernt. |
 | `/api/reject` | `{"session","track"}` | „Keine Karte“: Track verwerfen, Stelle als Hintergrund merken, Negativbeispiel lernen. |
+| `/api/dismiss` | `{"session","track"}` | Karte ohne Angabe von Gründen ausblenden (✕): weg aus Dock und Video, nichts gelernt. Liegt dort später eine andere Karte, wird sie normal erkannt. |
 | `/api/refresh` | `{"session","track"}` | Karte neu erkennen und Preis neu laden. |
 | `/api/highlight` | `{"session","label"}` | Karte im Video hervorheben; `label: null` hebt auf. Läuft nach 3 s ohne Wiederholung automatisch ab. |
 | `/api/forget` | `{"key"}` | Gelernte Referenzen einer Karte löschen. |

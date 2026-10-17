@@ -46,6 +46,7 @@ header {
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex: none; }
 .dot.ok { background: var(--ok); box-shadow: 0 0 6px rgba(63,185,80,.6); }
 .dot.err { background: var(--bad); }
+.dot.warn { background: var(--warn); }
 .learned { color: var(--muted); white-space: nowrap; font-size: 12px; }
 .learned b { color: var(--text); font-weight: 600; }
 .ctrl { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; }
@@ -91,6 +92,32 @@ h2 .count {
 .tile.hl { border-color: var(--hl); box-shadow: 0 0 0 1px var(--hl), 0 0 10px rgba(255,215,90,.25); }
 .tile.busy { opacity: .7; cursor: progress; }
 .tile-confirm { border-color: rgba(240,180,41,.55); background: linear-gradient(180deg, rgba(240,180,41,.08), transparent 70px), var(--tile); }
+.tile { position: relative; }
+/* ✕ oben rechts: Karte ohne Angabe von Gründen ausblenden */
+.tile .close {
+  position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%;
+  background: rgba(229,72,77,.15); color: #ff5a5f; font-size: 13px; font-weight: 700; line-height: 20px; cursor: pointer; z-index: 2;
+}
+.tile .close:hover, .tile .close:focus-visible { opacity: 1; background: #e5484d; color: #fff; }
+.tile-confirm .ct-head { padding-right: 22px; }
+.tile-compact .cm-info { padding-right: 18px; }
+/* Karte fehlt gerade in /api/state bzw. ist "rejected": letzter Inhalt bleibt, aber ausgegraut. */
+.tile.gone { border-style: dashed; }
+.tile.gone .compare, .tile.gone .info, .tile.gone .ct-head .badge,
+.tile.gone .cm > .badge, .tile.gone .cm > .img, .tile.gone .cm-info > .name, .tile.gone .cm-info > .meta {
+  opacity: .4; filter: grayscale(1);
+}
+.tile.checking .compare { opacity: .8; }
+.note { color: var(--warn); font-size: 11px; font-style: italic; white-space: nowrap; }
+.ct-q .sub { display: flex; gap: 6px; min-height: 15px; min-width: 0; overflow: hidden; font-size: 11px; }
+.compare { position: relative; }
+.newsug {
+  position: absolute; z-index: 2; border: 1px solid var(--accent); background: rgba(30,31,37,.94); color: #cfe0ff;
+  border-radius: 4px; font-size: 11px; padding: 3px 8px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.45);
+}
+.newsug:hover { background: #2a3550; }
+.compare .newsug { left: 4px; right: 4px; bottom: 22px; }
+.tile-compact .newsug { right: 4px; top: 4px; }
 
 .badge {
   display: inline-flex; align-items: center; justify-content: center; flex: none;
@@ -352,11 +379,24 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
   }
 
   // ---------- Zustand ----------
-  var state = null, failCount = 0, pollTimer = null, inflight = false, again = false, everOk = false;
+  // Grundsätze (siehe Kopf von docs/DOCK.md):
+  // - Eine gestellte Frage („Bitte bestätigen“) ist klebrig: sie bleibt, bis der Nutzer antwortet, die Karte
+  //   > ASK_GONE_MS fehlt oder sie ASK_SAFE_MS am Stück sicher erkannt ist (und niemand mit ihr arbeitet).
+  // - Fehlt eine Karte kurz (oder ist "rejected"), bleibt die Kachel ausgegraut mit letztem Inhalt stehen.
+  // - Kacheln, mit denen der Nutzer arbeitet (Maus, Fokus, Suchtext, geöffnete Liste), sind eingefroren:
+  //   kein Inhaltswechsel, kein Neuaufbau, keine Positionsänderung; vor ihnen wird nichts eingefügt/entfernt.
+  // - Zeitregeln zählen nur erfolgreiche Abfragen (lastOkAt) – ein Engine-Aussetzer räumt nichts ab.
+  var MISSING_MAX_MS = 120000;  // Obergrenze, auch für eingefrorene Kacheln (ohne Eingabe)
+  var ASK_GONE_MS = 20000, ASK_SAFE_MS = 10000, SEEN_GONE_MS = 4000, THAW_MS = 1500,
+      CONFIRM_GRACE_MS = 8000, DISMISS_MS = 5000, POLL_TIMEOUT_MS = 3000;
+  var state = null, failCount = 0, pollTimer = null, inflight = false, again = false, everOk = false, lastOkAt = 0;
   var selSession = store.get('tcl.dock.session', '*');
   var onlyUnsure = store.get('tcl.dock.unsure', '0') === '1';
-  var tiles = new Map();    // "session|track" -> Kachel
-  var pickers = new Map();  // "session|track" -> Alternativen-/Suchauswahl (überlebt Moduswechsel)
+  var tiles = new Map();                    // "session|track" -> Kachel-Objekt (überlebt Moduswechsel)
+  var orders = { confirm: [], compact: [] }; // Reihenfolge je Abschnitt
+  var dismissed = new Map();                // vom Nutzer verworfene Karten -> Zeitpunkt
+  var view = { active: null, multi: false, sessions: 0 };
+  var filterDirty = false;
 
   var ui = {
     dot: $('dot'), status: $('status'), learned: $('learned'), srcWrap: $('src-wrap'), src: $('src'),
@@ -368,24 +408,39 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
   ui.unsure.addEventListener('change', function () {
     onlyUnsure = ui.unsure.checked;
     store.set('tcl.dock.unsure', onlyUnsure ? '1' : '0');
-    render();
+    filterDirty = true;
+    if (everOk) layout();
   });
   ui.src.addEventListener('change', function () {
     selSession = ui.src.value;
     store.set('tcl.dock.session', selSession);
-    render();
+    filterDirty = true;
+    if (everOk) { renderHead(); layout(); }
   });
 
+  var dockRev = null;
   function poll() {
     clearTimeout(pollTimer);
     if (inflight) { again = true; return; }
     inflight = true;
-    fetchJson('/api/state', {}, 2500).then(function (r) {
-      if (!r.ok || !r.json) throw new Error('HTTP ' + r.status);
-      state = r.json; failCount = 0; everOk = true;
-      render();
-    }).catch(function () {
+    fetchJson('/api/state', {}, POLL_TIMEOUT_MS).then(function (r) {
+      if (!r.ok || !r.json || typeof r.json !== 'object') throw new Error('HTTP ' + r.status);
+      state = r.json; failCount = 0; everOk = true; lastOkAt = Date.now();
+      // Neue Dock-Version in der Engine → Seite neu laden (nicht während einer Eingabe)
+      if (state.dock_rev) {
+        if (dockRev === null) dockRev = state.dock_rev;
+        else if (dockRev !== state.dock_rev && !(document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName))) {
+          location.reload(); return;
+        }
+      }
+      ingest(state);
+      renderHead();
+      layout();
+    }).catch(function (e) {
       failCount++;
+      if (e && !(e.name === 'AbortError' || /^HTTP /.test(e.message || '') || e instanceof TypeError) && window.console) {
+        console.error(e); // Programmfehler nicht verschlucken
+      }
       renderOffline();
     }).then(function () {
       inflight = false;
@@ -395,12 +450,20 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
   }
   function pollNow() { poll(); }
 
+  function clock(ms) {
+    try { return new Date(ms).toLocaleTimeString('de-DE'); } catch (e) { return ''; }
+  }
+  // Fehler beim Abfragen: alles stehen lassen, nur den Kopf ändern (keine Layout-Verschiebung).
   function renderOffline() {
-    if (failCount < 2 && everOk) return; // einzelne Aussetzer nicht anzeigen
-    show(ui.offline, true);
-    cls(ui.main, 'stale', everOk);
-    ui.dot.className = 'dot err';
-    setText(ui.status, 'Engine nicht erreichbar');
+    if (!everOk) {
+      show(ui.offline, true);
+      ui.dot.className = 'dot err';
+      setText(ui.status, 'Engine nicht erreichbar');
+      return;
+    }
+    var bad = failCount >= 4;
+    ui.dot.className = 'dot ' + (bad ? 'err' : 'warn');
+    setText(ui.status, (bad ? 'Engine nicht erreichbar' : 'Verbindung hakt') + ' – Stand ' + clock(lastOkAt));
   }
 
   // ---------- Hervorheben ----------
@@ -409,7 +472,8 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     if (hover && hover.key === t.key) return;
     hlStop(hover && hover.sid === t.sid); // gleiche Quelle: neues Label ersetzt das alte, kein null nötig
     var send = function () {
-      if (t.card && t.card.label) postQuiet('/api/highlight', { session: t.sid, label: t.card.label });
+      var c = t.shown || t.latest;
+      if (c && c.label) postQuiet('/api/highlight', { session: t.sid, label: c.label });
     };
     hover = { key: t.key, sid: t.sid, timer: setInterval(send, HL_MS) };
     send();
@@ -420,52 +484,115 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     if (!silent) postQuiet('/api/highlight', { session: hover.sid, label: null });
     hover = null;
   }
-  function bindHover(t) {
-    var e = t.el;
-    e.addEventListener('mouseenter', function () { hlStart(t); });
-    e.addEventListener('mouseleave', function () {
-      if (!e.contains(document.activeElement) && hover && hover.key === t.key) hlStop();
-    });
-    e.addEventListener('focusin', function () { hlStart(t); });
-    e.addEventListener('focusout', function (ev) {
-      if (ev.relatedTarget && e.contains(ev.relatedTarget)) return;
-      if (e.matches(':hover')) return;
-      if (hover && hover.key === t.key) hlStop();
-    });
+
+  // ---------- Interaktion / Einfrieren ----------
+  function interacting(t) {
+    if (!t.el || !t.el.isConnected) return false;
+    var p = t.picker;
+    var f = document.activeElement;
+    var typing = !!f && f !== document.body && t.el.contains(f) && /^(INPUT|SELECT|TEXTAREA)$/.test(f.tagName);
+    var hovered = t.el.matches(':hover') && Date.now() - lastMouseMove < HOVER_STALE_MS;
+    return t.busy || hovered || typing ||
+      (p.open && p.userOpen) || p.r.q.value.trim() !== '';
   }
+  var lastMouseMove = 0, HOVER_STALE_MS = 4000;
+  document.addEventListener('mousemove', function () { lastMouseMove = Date.now(); }, true);
+  document.addEventListener('mouseleave', function () { lastMouseMove = 0; });
+  window.addEventListener('blur', function () { lastMouseMove = 0; });
+  function touch(t) {
+    if (!t.el) return;
+    if (interacting(t)) {
+      if (t.thawTimer) { clearTimeout(t.thawTimer); t.thawTimer = null; }
+      if (!t.frozen) { t.frozen = true; t.el.classList.add('frozen'); }
+    } else if (t.frozen && !t.thawTimer) {
+      t.thawTimer = setTimeout(function () {
+        t.thawTimer = null;
+        if (!t.el || interacting(t)) return;
+        t.frozen = false;
+        t.el.classList.remove('frozen');
+        if (everOk) layout();
+      }, THAW_MS);
+    }
+  }
+  // Sicherheitsnetz: verpasste mouseleave/blur-Ereignisse (z. B. Fokus wechselt nach OBS) nachholen.
+  setInterval(function () { tiles.forEach(touch); }, 700);
 
   // ---------- Aktionen ----------
   function act(t, path, body, okMsg) {
     if (t.busy) return Promise.resolve(false);
     t.busy = true;
-    t.el.classList.add('busy');
-    var btns = Array.prototype.slice.call(t.el.querySelectorAll('button'));
+    touch(t);
+    var e = t.el;
+    e.classList.add('busy');
+    var btns = Array.prototype.slice.call(e.querySelectorAll('button'));
     btns.forEach(function (b) { b.disabled = true; });
     return post(path, body).then(function () {
       if (okMsg) toast(okMsg, 'ok');
       return true;
-    }, function (e) {
-      toast('Fehler: ' + (e && e.message ? e.message : 'Anfrage fehlgeschlagen'));
+    }, function (err) {
+      toast('Fehler: ' + (err && err.message ? err.message : 'Anfrage fehlgeschlagen'));
       return false;
     }).then(function (ok) {
       t.busy = false;
-      t.el.classList.remove('busy');
+      e.classList.remove('busy');
       btns.forEach(function (b) { b.disabled = false; });
+      touch(t);
       pollNow();
       return ok;
     });
   }
-  function confirmKey(t, key) {
+  function confirmKey(t, key, opt) {
     if (!key) return;
     act(t, '/api/confirm', { session: t.sid, track: t.track, key: key }, 'Bestätigt – wird gelernt.').then(function (ok) {
-      if (ok) { var p = pickers.get(t.key); if (p) p.setOpen(false); }
+      if (!ok) return;
+      var p = t.picker;
+      p.clear();
+      p.setOpen(false);
+      p.userOpen = false;
+      // Sofort lokal als bestätigt zeigen; die nächste Abfrage liefert die echten Daten nach.
+      var old = t.latest || t.shown || {};
+      var c = Object.assign({}, old, {
+        key: key, confirmed: true, needs_confirmation: false, sticky: false, recheck: false,
+        method: 'bestätigt', state: 'identified', reason: null
+      });
+      if (key !== old.key) {
+        c.set_code = null; c.price = null; c.cardmarket_url = null;
+        if (opt) ['name', 'set_name', 'set_code', 'number', 'image'].forEach(function (k) {
+          if (opt[k] != null) c[k] = opt[k];
+        });
+      }
+      t.latest = c;
+      t.asked = false;
+      t.sticky = false;
+      t.recheck = false;
+      t.userConfirmedAt = Date.now();
+      t.forced = true; // Antwort des Nutzers: Kachel darf sofort wandern
+      t.freshUntil = Date.now() + 5000;
+      layout();
     });
   }
   function rejectCard(t) {
-    act(t, '/api/reject', { session: t.sid, track: t.track }, 'Als „Keine Karte“ gemerkt.');
+    act(t, '/api/reject', { session: t.sid, track: t.track }, 'Als „Keine Karte“ gemerkt.').then(function (ok) {
+      if (!ok) return;
+      dismissed.set(t.key, Date.now());
+      t.dismissed = true;
+      t.forced = true;
+      layout();
+    });
+  }
+  function dismissCard(t) {
+    act(t, '/api/dismiss', { session: t.sid, track: t.track }).then(function (ok) {
+      if (!ok) return;
+      dismissed.set(t.key, Date.now());
+      t.dismissed = true;
+      t.forced = true;
+      layout();
+    });
   }
   function refreshCard(t) {
-    act(t, '/api/refresh', { session: t.sid, track: t.track });
+    act(t, '/api/refresh', { session: t.sid, track: t.track }).then(function (ok) {
+      if (ok) t.freshUntil = Date.now() + 5000; // eigener Wunsch: neue Daten auch bei Maus über der Kachel zeigen
+    });
   }
 
   // ---------- Alternativen / Suche ----------
@@ -488,11 +615,11 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     b.title = [o.name, o.set_name, o.number].filter(Boolean).join(' – ') + ' (wählen)';
     b.appendChild(box);
     b.appendChild(tx);
-    b.addEventListener('click', function () { onPick(o.key); });
+    b.addEventListener('click', function () { onPick(o); });
     return b;
   }
 
-  function makePicker(key) {
+  function makePicker(t) {
     var root = el('div', 'picker');
     root.hidden = true;
     root.innerHTML =
@@ -507,16 +634,23 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
       '<div class="pk-list" data-r="results"></div>' +
       '<div class="pk-foot" data-r="foot" hidden><button type="button" class="btn sm danger" data-r="reject">Keine Karte</button></div>';
     var r = refs(root);
+    function pick(o) { confirmKey(t, o.key, o); }
     var p = {
-      el: root, key: key, open: false, sig: null, gameSet: false, timer: null, req: 0, tile: null,
+      el: root, open: false, userOpen: false, sig: null, gameSet: false, timer: null, req: 0, r: r,
       setOpen: function (on) {
         p.open = !!on;
         show(root, p.open);
-        if (p.tile && p.tile.r.other) p.tile.r.other.setAttribute('aria-expanded', p.open ? 'true' : 'false');
+        if (t.r && t.r.other) t.r.other.setAttribute('aria-expanded', p.open ? 'true' : 'false');
       },
-      update: function (t) {
-        p.tile = t;
-        var c = t.card || {};
+      clear: function () {
+        clearTimeout(p.timer);
+        p.req++;
+        r.q.value = '';
+        r.results.textContent = '';
+        show(r.smsg, false);
+      },
+      update: function () {
+        var c = t.shown || {};
         if (!p.gameSet && c.game) { r.game.value = c.game === 'magic' || c.game === 'pokemon' ? c.game : ''; p.gameSet = true; }
         show(r.foot, t.mode === 'compact');
         var cands = Array.isArray(c.candidates) ? c.candidates : [];
@@ -524,9 +658,7 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
         if (sig === p.sig) return;
         p.sig = sig;
         r.cands.textContent = '';
-        cands.forEach(function (o) {
-          r.cands.appendChild(optButton(o, o.key === c.key, function (k) { confirmKey(p.tile, k); }));
-        });
+        cands.forEach(function (o) { r.cands.appendChild(optButton(o, o.key === c.key, pick)); });
         show(r.cmsg, cands.length === 0);
         if (t.busy) r.cands.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
       }
@@ -551,10 +683,8 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
           if (!res.ok || !res.json) throw new Error('HTTP ' + res.status);
           var list = Array.isArray(res.json.results) ? res.json.results : [];
           r.results.textContent = '';
-          var cur = p.tile && p.tile.card ? p.tile.card.key : null;
-          list.forEach(function (o) {
-            r.results.appendChild(optButton(o, o.key === cur, function (k) { confirmKey(p.tile, k); }));
-          });
+          var cur = t.shown ? t.shown.key : null;
+          list.forEach(function (o) { r.results.appendChild(optButton(o, o.key === cur, pick)); });
           show(r.smsg, list.length === 0);
           setText(r.smsg, 'Keine Treffer.');
         }).catch(function () {
@@ -564,31 +694,31 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
         });
       }, SEARCH_MS);
     }
-    r.q.addEventListener('input', search);
+    r.q.addEventListener('input', function () { touch(t); search(); });
     r.game.addEventListener('change', search);
     r.q.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') { if (r.q.value) { r.q.value = ''; search(); } else p.setOpen(false); }
+      if (e.key !== 'Escape') return;
+      if (r.q.value) { r.q.value = ''; search(); }
+      else { p.setOpen(false); p.userOpen = false; }
+      touch(t);
     });
-    r.reject.addEventListener('click', function () { if (p.tile) rejectCard(p.tile); });
-    p.r = r;
-    return p;
-  }
-  function getPicker(key) {
-    var p = pickers.get(key);
-    if (!p) { p = makePicker(key); pickers.set(key, p); }
+    r.reject.addEventListener('click', function () { rejectCard(t); });
     return p;
   }
 
   // ---------- Kacheln ----------
   var CONFIRM_HTML =
+    '<button type="button" class="close" data-r="close" title="Entfernen (ohne Angabe von Gründen)" aria-label="Entfernen">✕</button>' +
     '<div class="ct-head">' +
     '  <span class="badge badge-lg" data-r="badge"></span>' +
-    '  <div class="ct-q"><div class="q">Ist das die Karte?</div><div class="src" data-r="src"></div></div>' +
+    '  <div class="ct-q"><div class="q">Ist das die Karte?</div>' +
+    '    <div class="sub"><span class="note" data-r="note" hidden></span><span class="src" data-r="src"></span></div></div>' +
     '  <span class="sim" data-r="sim" title="Ähnlichkeit"></span>' +
     '</div>' +
     '<div class="compare">' +
     '  <figure data-r="fcrop"><figcaption>Kamera</figcaption></figure>' +
     '  <figure data-r="fimage"><figcaption>Referenz</figcaption></figure>' +
+    '  <button type="button" class="newsug" data-r="newsug" hidden title="Die Engine schlägt inzwischen etwas anderes vor">Neuer Vorschlag verfügbar – aktualisieren</button>' +
     '</div>' +
     '<div class="info">' +
     '  <div class="name" data-r="name"></div>' +
@@ -603,6 +733,7 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     '</div>';
 
   var COMPACT_HTML =
+    '<button type="button" class="close" data-r="close" title="Entfernen (ohne Angabe von Gründen)" aria-label="Entfernen">✕</button>' +
     '<div class="cm">' +
     '  <span class="badge" data-r="badge"></span>' +
     '  <div data-r="imgslot"></div>' +
@@ -611,7 +742,8 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     '    <div class="meta" data-r="meta"></div>' +
     '    <div class="cm-line">' +
     '      <span class="price" data-r="price"></span><span class="chg" data-r="chg" title="Änderung 30 Tage"></span>' +
-    '      <span class="tag" data-r="tag" hidden></span><span class="src-sm" data-r="src"></span>' +
+    '      <span class="tag" data-r="tag" hidden></span><span class="note" data-r="note" hidden></span>' +
+    '      <span class="src-sm" data-r="src"></span>' +
     '    </div>' +
     '    <div class="cm-act">' +
     '      <a data-r="cm" target="_blank" rel="noopener" hidden>Cardmarket ↗</a>' +
@@ -619,39 +751,90 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     '      <button type="button" class="btn sm" data-r="other" aria-expanded="false">Falsch?</button>' +
     '    </div>' +
     '  </div>' +
-    '</div>';
+    '</div>' +
+    '<button type="button" class="newsug" data-r="newsug" hidden title="Die Engine meldet inzwischen etwas anderes">Neuer Vorschlag – aktualisieren</button>';
 
-  function makeTile(key, sid, track, mode) {
+  function newTile(key, sid, track) {
+    var t = {
+      key: key, sid: sid, track: track, label: '', ses: null, sesIdx: 0, latest: null, shown: null,
+      mode: null, el: null, r: null, visible: false,
+      asked: false, safeSince: null, missingSince: null, recheck: false, sticky: false, userConfirmedAt: 0,
+      frozen: false, thawTimer: null, freshUntil: 0, busy: false, forced: false, dismissed: false, autoOpened: false
+    };
+    t.picker = makePicker(t);
+    return t;
+  }
+
+  // Baut das DOM einer Kachel für einen Modus (nur bei Moduswechsel – nie für eingefrorene Kacheln).
+  function buildEl(t, mode) {
+    if (hover && hover.key === t.key) hlStop();
+    if (t.el && t.el.parentNode) t.el.parentNode.removeChild(t.el);
+    clearTimeout(t.thawTimer);
+    t.thawTimer = null;
+    t.frozen = false;
     var e = el('article', 'tile ' + (mode === 'confirm' ? 'tile-confirm' : 'tile-compact'));
     e.tabIndex = 0;
+    e.hidden = true;
     e.innerHTML = mode === 'confirm' ? CONFIRM_HTML : COMPACT_HTML;
-    var t = { key: key, sid: sid, track: track, mode: mode, el: e, r: refs(e), card: null, busy: false, autoOpened: false };
-    var r = t.r;
+    t.el = e; t.r = refs(e); t.mode = mode; t.visible = false; t.shown = null;
+    var r = t.r, p = t.picker;
+    r.close.addEventListener('click', function (ev) { ev.stopPropagation(); dismissCard(t); });
     if (mode === 'confirm') {
+      t.autoOpened = false;
       r.crop = imgBox(); r.fcrop.insertBefore(r.crop, r.fcrop.firstChild);
       r.image = imgBox(); r.fimage.insertBefore(r.image, r.fimage.firstChild);
-      r.yes.addEventListener('click', function () { if (t.card) confirmKey(t, t.card.key); });
+      r.yes.addEventListener('click', function () { if (t.shown) confirmKey(t, t.shown.key); });
       r.reject.addEventListener('click', function () { rejectCard(t); });
     } else {
       r.image = imgBox(); r.imgslot.replaceWith(r.image);
       r.refresh.addEventListener('click', function () { refreshCard(t); });
+      p.setOpen(false);
+      p.userOpen = false;
     }
-    var p = getPicker(key);
+    p.sig = null;
     e.appendChild(p.el);
+    p.setOpen(p.open);
     r.other.addEventListener('click', function () {
       p.setOpen(!p.open);
+      p.userOpen = p.open;
       if (p.open) p.r.q.focus({ preventScroll: true });
+      touch(t);
     });
-    bindHover(t);
-    return t;
+    r.newsug.addEventListener('click', function () {
+      applyContent(t);
+      status(t);
+    });
+    e.addEventListener('mouseenter', function () { touch(t); hlStart(t); });
+    e.addEventListener('mouseleave', function () {
+      touch(t);
+      if (!e.contains(document.activeElement) && hover && hover.key === t.key) hlStop();
+    });
+    e.addEventListener('focusin', function () { touch(t); hlStart(t); });
+    e.addEventListener('focusout', function (ev) {
+      setTimeout(function () { touch(t); }, 0);
+      if (ev.relatedTarget && e.contains(ev.relatedTarget)) return;
+      if (e.matches(':hover')) return;
+      if (hover && hover.key === t.key) hlStop();
+    });
   }
 
-  function updateTile(t, c, ses, multi) {
-    var r = t.r;
-    t.card = c;
+  function destroy(t) {
+    if (hover && hover.key === t.key) hlStop();
+    clearTimeout(t.thawTimer);
+    clearTimeout(t.picker.timer);
+    if (t.el && t.el.parentNode) t.el.parentNode.removeChild(t.el);
+    t.el = null; t.mode = null;
+    tiles.delete(t.key);
+  }
+
+  // Inhalt aus t.latest übernehmen (nur wenn nicht eingefroren oder auf Wunsch des Nutzers).
+  function applyContent(t) {
+    var c = t.latest;
+    if (!c) return;
+    t.shown = c;
+    var r = t.r, ses = t.ses || {};
     setText(r.badge, c.label || '?');
-    setText(r.src, multi ? (ses.source || ses.id) : '');
-    cls(t.el, 'hl', !!ses.highlight && ses.highlight === c.label);
+    setText(r.src, view.multi ? (ses.source || ses.id) : '');
     var title = c.name || (c.state === 'failed' ? 'Nicht erkannt' :
       (c.state === 'new' || c.state === 'identifying') ? 'Wird erkannt …' : 'Unbekannte Karte');
     setText(r.name, title);
@@ -665,7 +848,7 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
       var noKey = !c.key;
       show(r.yes, !noKey);
       show(r.hint, noKey);
-      if (noKey && !t.autoOpened) { t.autoOpened = true; getPicker(t.key).setOpen(true); }
+      if (noKey && !t.autoOpened) { t.autoOpened = true; t.picker.setOpen(true); }
     } else {
       var pr = c.price;
       if (pr && typeof pr.value === 'number') {
@@ -697,31 +880,121 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
       if (url && r.cm.getAttribute('href') !== url) r.cm.setAttribute('href', url);
       r.refresh.title = 'Aktualisieren (neu erkennen, Preis neu laden)';
     }
-    getPicker(t.key).update(t);
+    t.picker.update();
   }
 
-  function place(grid, nodes) {
-    var ref = grid.firstElementChild;
-    for (var i = 0; i < nodes.length; i++) {
-      var n = nodes[i];
-      if (n === ref) { ref = ref.nextElementSibling; continue; }
-      grid.insertBefore(n, ref);
-    }
-    while (ref) { var nx = ref.nextElementSibling; grid.removeChild(ref); ref = nx; }
+  // Zustandsanzeige – darf sich auch bei eingefrorenen Kacheln ändern (ändert keine Positionen).
+  function status(t) {
+    var r = t.r, missing = t.missingSince != null;
+    cls(t.el, 'gone', missing);
+    cls(t.el, 'checking', !missing && t.recheck);
+    var note = missing ? 'Karte wird gerade neu geprüft …' : t.recheck ? 'wird neu geprüft …' :
+      (t.mode === 'confirm' && t.sticky ? 'wartet auf deine Antwort' : '');
+    setText(r.note, note);
+    show(r.note, !!note);
+    var hl = t.ses && t.ses.highlight, lab = (t.shown || t.latest || {}).label;
+    cls(t.el, 'hl', !!hl && hl === lab);
+    var a = t.shown, b = t.latest;
+    show(r.newsug, !!(t.frozen && a && b && a !== b && (a.key !== b.key || a.name !== b.name)));
   }
 
   function isUnsure(c) {
     return !!c.needs_confirmation || c.state === 'uncertain' || c.state === 'failed';
   }
+  function cmpTile(a, b) {
+    return (a.sesIdx - b.sesIdx) || labelCmp(a.label, b.label) || (a.track > b.track ? 1 : a.track < b.track ? -1 : 0);
+  }
+  function maxFrozen(arr) {
+    for (var i = arr.length - 1; i >= 0; i--) if (arr[i].frozen && arr[i].visible) return i;
+    return -1;
+  }
+  // Darf t seinen Abschnitt verlassen bzw. ausgeblendet werden, ohne dass eine eingefrorene Kachel springt?
+  function canLeave(t) {
+    if (!t.visible) return true;
+    var arr = orders[t.mode], i = arr.indexOf(t);
+    if (i < 0) return true;
+    if (i <= maxFrozen(arr)) return false;
+    if (t.mode === 'confirm' && maxFrozen(orders.compact) >= 0) return false; // Erkannt-Abschnitt würde hochrutschen
+    return true;
+  }
+  // Einfügen: sortiert nach Kennzeichen, aber nie vor einer eingefrorenen Kachel.
+  function insertSorted(arr, t) {
+    var i = maxFrozen(arr) + 1;
+    for (; i < arr.length; i++) if (cmpTile(arr[i], t) > 0) break;
+    arr.splice(i, 0, t);
+  }
+
+  function desired(t) {
+    if (t.dismissed) return 'gone';
+    var miss = t.missingSince == null ? 0 : lastOkAt - t.missingSince;
+    var typing = t.el && t.picker && (t.picker.r.q.value.trim() !== '' || t.el.contains(document.activeElement));
+    if (miss > MISSING_MAX_MS && !typing) return 'gone';
+    if (t.asked) {
+      if (miss > ASK_GONE_MS && !t.frozen) return 'gone';
+      if (t.safeSince != null && lastOkAt - t.safeSince >= ASK_SAFE_MS && !t.frozen) t.asked = false;
+      else return 'confirm';
+    }
+    if (miss > SEEN_GONE_MS && !t.frozen) return 'gone';
+    return 'compact';
+  }
+
+  // Übernimmt eine erfolgreiche /api/state-Antwort in die Kachel-Modelle (ohne DOM).
+  var engineInstance = null;
+  function ingest(s) {
+    var now = Date.now(), seen = new Set();
+    if (s.instance && engineInstance !== s.instance) {
+      if (engineInstance !== null) {
+        tiles.forEach(function (t) { if (t.el && t.el.parentNode) t.el.parentNode.removeChild(t.el); });
+        tiles.clear(); dismissed.clear();
+      }
+      engineInstance = s.instance;
+    }
+    var sessions = Array.isArray(s.sessions) ? s.sessions : [];
+    dismissed.forEach(function (at, key) { if (now - at > 600000) dismissed.delete(key); });
+    sessions.forEach(function (ses, si) {
+      if (!ses) return;
+      (Array.isArray(ses.cards) ? ses.cards : []).forEach(function (c) {
+        if (!c || c.track == null) return;
+        var key = ses.id + '|' + c.track;
+        var rejected = c.state === 'rejected';
+        var d = dismissed.get(key);
+        if (d != null) {
+          if (rejected || now - d < DISMISS_MS) return;
+          dismissed.delete(key); // Engine fragt erneut
+        }
+        var t = tiles.get(key);
+        if (!t) {
+          if (rejected) return;
+          t = newTile(key, ses.id, c.track);
+          tiles.set(key, t);
+        }
+        t.ses = ses; t.sesIdx = si;
+        if (rejected) return; // wie „fehlt“: ausgegraut stehen lassen
+        seen.add(key);
+        t.latest = c;
+        if (c.label) t.label = c.label;
+        t.missingSince = null;
+        t.recheck = !!c.recheck;
+        t.sticky = !!c.sticky;
+        var grace = t.userConfirmedAt && now - t.userConfirmedAt < CONFIRM_GRACE_MS;
+        if ((c.needs_confirmation || c.sticky) && !grace) t.asked = true;
+        var safe = !c.sticky && (!c.needs_confirmation || !!c.confirmed);
+        if (safe) { if (t.safeSince == null) t.safeSince = now; }
+        else t.safeSince = null;
+      });
+    });
+    tiles.forEach(function (t, key) {
+      if (seen.has(key)) return;
+      if (t.missingSince == null) t.missingSince = now;
+      t.safeSince = null;
+    });
+  }
 
   var srcSig = null;
-  function render() {
+  function renderHead() {
     var s = state || {};
     var sessions = Array.isArray(s.sessions) ? s.sessions : [];
     show(ui.offline, false);
-    cls(ui.main, 'stale', false);
-
-    // Kopf
     ui.dot.className = 'dot ok';
     setText(ui.status, (s.status || 'verbunden') + (s.engine ? ' · Engine ' + s.engine : ''));
     var L = s.learned;
@@ -735,9 +1008,8 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
         (typeof L.dataset === 'number' ? ' · Trainingsbeispiele: ' + L.dataset : '');
     } else show(ui.learned, false);
 
-    // Quellen-Auswahl
     var sig = sessions.map(function (x) { return x.id + '\u0001' + (x.source || ''); }).join('\u0002');
-    if (sig !== srcSig) {
+    if (sig !== srcSig && document.activeElement !== ui.src) {
       srcSig = sig;
       ui.src.textContent = '';
       var all = el('option', null, 'Alle Quellen'); all.value = '*'; ui.src.appendChild(all);
@@ -746,53 +1018,85 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
       ui.src.value = known ? selSession : '*';
     }
     show(ui.srcWrap, sessions.length > 1);
-    var active = sessions;
-    if (sessions.length > 1 && selSession !== '*') {
-      var f = sessions.filter(function (x) { return x.id === selSession; });
-      if (f.length) active = f;
+    var active = null;
+    if (sessions.length > 1 && selSession !== '*' && sessions.some(function (x) { return x.id === selSession; })) {
+      active = new Set([selSession]);
     }
-    var multi = active.length > 1;
+    view.active = active;
+    view.multi = !active && sessions.length > 1;
+    view.sessions = sessions.length;
+  }
 
-    var present = new Set(), confirmNodes = [], seenNodes = [];
-    active.forEach(function (ses) {
-      var cards = (Array.isArray(ses.cards) ? ses.cards : []).filter(function (c) { return c && c.state !== 'rejected'; });
-      cards.sort(function (a, b) { return labelCmp(a.label, b.label); });
-      cards.forEach(function (c) {
-        var key = ses.id + '|' + c.track;
-        var mode = c.needs_confirmation ? 'confirm' : 'compact';
-        present.add(key);
-        var t = tiles.get(key);
-        if (t && t.mode !== mode) {
-          if (t.el.parentNode) t.el.parentNode.removeChild(t.el);
-          t = null;
-          tiles.delete(key);
-          if (mode === 'compact') getPicker(key).setOpen(false);
-        }
-        if (!t) { t = makeTile(key, ses.id, c.track, mode); tiles.set(key, t); }
-        updateTile(t, c, ses, multi);
-        if (mode === 'confirm') confirmNodes.push(t.el);
-        else if (!onlyUnsure || isUnsure(c)) seenNodes.push(t.el);
+  function wantVisible(t) {
+    if (view.active && !view.active.has(t.sid)) return false;
+    if (t.mode === 'compact' && onlyUnsure) return isUnsure(t.shown || t.latest || {});
+    return true;
+  }
+
+  // Entfernt fremde Knoten und ordnet nur dort um, wo es nötig ist (vorhandene Knoten bleiben stehen).
+  function place(grid, arr) {
+    var want = new Set(arr.map(function (t) { return t.el; }));
+    Array.prototype.slice.call(grid.children).forEach(function (n) { if (!want.has(n)) grid.removeChild(n); });
+    var ref = grid.firstElementChild;
+    arr.forEach(function (t) {
+      var n = t.el;
+      if (n === ref) { ref = ref.nextElementSibling; return; }
+      grid.insertBefore(n, ref);
+    });
+  }
+
+  function layout() {
+    // Anker: erste eingefrorene Kachel – falls sich darüber doch etwas verschiebt, wird nachgescrollt.
+    var anchor = null, top0 = 0;
+    tiles.forEach(function (t) { if (!anchor && t.frozen && t.visible && t.el && t.el.isConnected) anchor = t; });
+    if (anchor) top0 = anchor.el.getBoundingClientRect().top;
+
+    // 1. Abschnittswechsel / Entfernen
+    Array.from(tiles.values()).forEach(function (t) {
+      var want = desired(t), cur = t.mode;
+      if (want === cur) { t.forced = false; return; }
+      if (cur && !t.forced && (t.frozen || !canLeave(t))) return;
+      t.forced = false;
+      if (cur) { var arr = orders[cur], i = arr.indexOf(t); if (i >= 0) arr.splice(i, 1); }
+      if (want === 'gone') { destroy(t); return; }
+      buildEl(t, want);
+      insertSorted(orders[want], t);
+    });
+
+    // 2. Inhalt (nur nicht eingefrorene), Zustand, Sichtbarkeit
+    ['confirm', 'compact'].forEach(function (m) {
+      orders[m].forEach(function (t) {
+        if (!t.frozen || !t.shown || t.freshUntil > Date.now()) applyContent(t);
+        status(t);
+        var v = wantVisible(t);
+        if (v === t.visible) return;
+        if (v) {
+          var arr = orders[m];
+          if (!filterDirty && arr.indexOf(t) < maxFrozen(arr)) return; // würde eingefrorene Kachel verschieben
+        } else if (!filterDirty && (t.frozen || !canLeave(t))) return;
+        t.visible = v;
+        t.el.hidden = !v;
       });
     });
+    filterDirty = false;
 
-    // Verschwundene Karten aufräumen (gefilterte bleiben im Speicher erhalten).
-    tiles.forEach(function (t, key) {
-      if (present.has(key)) return;
-      if (hover && hover.key === key) hlStop();
-      if (t.el.parentNode) t.el.parentNode.removeChild(t.el);
-      tiles.delete(key);
-      pickers.delete(key);
-    });
+    // 3. DOM
+    place(ui.gridConfirm, orders.confirm);
+    place(ui.gridSeen, orders.compact);
+    var nC = orders.confirm.filter(function (t) { return t.visible; }).length;
+    var nS = orders.compact.filter(function (t) { return t.visible; }).length;
+    show(ui.secConfirm, nC > 0);
+    setText(ui.cntConfirm, nC);
+    setText(ui.cntSeen, nS);
+    show(ui.emptySeen, nS === 0 && nC === 0);
+    show(ui.secSeen, nS > 0 || nC === 0);
+    setText(ui.emptySeen, onlyUnsure && tiles.size > 0 ? 'Keine unsicheren Karten.' :
+      view.sessions === 0 ? 'Keine Quelle aktiv – Filter „TCG Card Lens“ in OBS hinzufügen.' : 'Keine Karten im Bild.');
 
-    place(ui.gridConfirm, confirmNodes);
-    place(ui.gridSeen, seenNodes);
-    show(ui.secConfirm, confirmNodes.length > 0);
-    setText(ui.cntConfirm, confirmNodes.length);
-    setText(ui.cntSeen, seenNodes.length);
-    show(ui.emptySeen, seenNodes.length === 0 && confirmNodes.length === 0);
-    show(ui.secSeen, seenNodes.length > 0 || confirmNodes.length === 0);
-    setText(ui.emptySeen, onlyUnsure && present.size > 0 ? 'Keine unsicheren Karten.' :
-      sessions.length === 0 ? 'Keine Quelle aktiv – Filter „TCG Card Lens“ in OBS hinzufügen.' : 'Keine Karten im Bild.');
+    if (anchor && anchor.el && anchor.el.isConnected) {
+      var d = anchor.el.getBoundingClientRect().top - top0;
+      if (Math.abs(d) > 0.5) window.scrollBy(0, d);
+    }
   }
 
   window.addEventListener('beforeunload', function () { if (hover) hlStop(); });

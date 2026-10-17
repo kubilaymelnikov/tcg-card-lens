@@ -35,6 +35,7 @@ ZONE_TTL_S = 15 * 60  # gemerkte "keine Karte"-Stellen verfallen nach 15 min
 
 SWAP_CHECK_S = 1.0
 SWAP_THRESHOLD = 0.5  # Korrelation der Vorschaubilder; gleiche Karte bei Bewegung/Licht typ. > 0.8
+SWAP_CONFIRM = 2  # so viele Prüfungen in Folge (bei ruhigem Kartenbereich) bestätigen einen Tausch
 
 
 def _signature(frame: np.ndarray, corners: np.ndarray) -> np.ndarray:
@@ -308,11 +309,15 @@ class CardPipeline:
             if t.signature is None or now < getattr(t, "next_swap_check", 0.0):
                 continue
             t.next_swap_check = now + SWAP_CHECK_S
+            if t.motion >= self.tracker.cfg.motion_still:
+                continue  # Hand/Bewegung über der Karte: kein Urteil, erst wenn der Bereich wieder ruht
             sim = float(np.dot(t.signature, _signature(frame, t.corners)))
-            if sim < SWAP_THRESHOLD:
+            t.swap_hits = t.swap_hits + 1 if sim < SWAP_THRESHOLD else 0
+            if t.swap_hits >= SWAP_CONFIRM:
+                t.swap_hits = 0
                 self.events.append(("tausch", t.id))
                 t.identity, t.signature, t.state, t.attempts, t.next_attempt = None, None, "new", 0, 0.0
-                t.confirmed = False
+                t.confirmed = t.user_rejected = t.hidden = False
 
     # ---------- Eingriffe aus dem Dock ----------
     def post(self, fn) -> None:
@@ -349,9 +354,22 @@ class CardPipeline:
             t = self._track(track_id)
             if t is None:
                 return
-            t.identity, t.signature, t.state, t.confirmed = None, None, "rejected", False
+            t.identity, t.state, t.confirmed = None, "rejected", False
+            t.user_rejected = True
+            t.signature = _signature(frame, t.corners)  # neuer Inhalt an dieser Stelle → Tausch → neu prüfen
             self.rejected_zones.append((t.corners.copy(), _signature(frame, t.corners), now))
             self.events.append(("keine-karte", t.id))
+        self.post(run)
+
+    def dismiss(self, track_id: int) -> None:
+        """Karte ausblenden (Dock-✕): keine Anzeige, keine Frage, nichts gelernt – bis dort eine andere Karte liegt."""
+        def run(frame, now):
+            t = self._track(track_id)
+            if t is None:
+                return
+            t.hidden = True
+            if t.signature is None:  # für die Tausch-Erkennung: aktueller Inhalt an dieser Stelle
+                t.signature = _signature(frame, t.corners)
         self.post(run)
 
     def refresh(self, track_id: int) -> None:

@@ -20,7 +20,9 @@ class NoDetector:
 def _pipeline_with_track():
     p = CardPipeline(NoDetector(), detect_hz=1)
     p.tracker.update([Detection(order_corners(QUAD), 0.9)], 0.0)
-    return p, p.tracker.tracks[0]
+    t = p.tracker.tracks[0]
+    t.locked = True  # ruhig liegende Karte (nur dann fragt das Dock)
+    return p, t
 
 
 def _identity(card_id="c1", certain=True, **kw):
@@ -85,7 +87,7 @@ def test_dock_state_lists_uncertain_card_with_alternatives():
     sess.label_for = lambda tid: Session.label_for(sess, tid)
     sess.current_highlight = lambda: Session.current_highlight(sess)
     shared = SimpleNamespace(session_list=[sess], identifier=SimpleNamespace(catalog=FakeCatalog()),
-                             names=SimpleNamespace(name=lambda rec, lang: rec.name), learned=None,
+                             names=SimpleNamespace(name=lambda rec, lang: rec.name, name_nowait=lambda rec, lang: rec.name), learned=None,
                              status="bereit", dock_seen=0.0)
     state = DockApi(shared).state()
     s = state["sessions"][0]
@@ -95,4 +97,130 @@ def test_dock_state_lists_uncertain_card_with_alternatives():
     assert [c["key"] for c in card["candidates"]] == ["pokemon|c1", "pokemon|c2"]
     assert card["price"] is None  # unsicher → kein Preis
     assert shared.dock_seen > 0
+    p.close()
+
+
+def _dock_with(p):
+    sess = SimpleNamespace(sid="s1", source="Kamera", pipeline=p, settings={"display_language": "de"},
+                           labels={}, highlight=None, last_frame_img=None)
+    sess.label_for = lambda tid: Session.label_for(sess, tid)
+    sess.current_highlight = lambda: None
+    shared = SimpleNamespace(session_list=[sess], identifier=SimpleNamespace(catalog=FakeCatalog()),
+                             names=SimpleNamespace(name=lambda rec, lang: rec.name, name_nowait=lambda rec, lang: rec.name),
+                             learned=None, status="bereit", dock_seen=0.0)
+    return DockApi(shared)
+
+
+def _cards(api):
+    return api.state()["sessions"][0]["cards"]
+
+
+def test_question_stays_while_card_is_rechecked_or_gone(monkeypatch):
+    import dock_server
+
+    p, t = _pipeline_with_track()
+    api = _dock_with(p)
+    t.identity, t.state = _identity(card_id="c1", certain=False, reason="geringe Ähnlichkeit"), "uncertain"
+    assert _cards(api)[0]["needs_confirmation"]
+    for a in api._asked.values():
+        a["first"] -= 5  # Frage war schon eine Weile zu sehen
+    # Engine prüft neu (Identität weg) → Frage bleibt mit letztem Inhalt stehen
+    t.identity, t.state = None, "identifying"
+    c = _cards(api)[0]
+    assert c["needs_confirmation"] and c["recheck"] and c["name"] == "Pikachu"
+    # Automatisch verworfen → Frage bleibt
+    t.state = "rejected"
+    assert _cards(api)[0]["sticky"]
+    # Karte ganz weg → Frage bleibt noch ASK_GONE_S stehen
+    p.tracker.tracks.clear()
+    assert _cards(api)[0]["gone"]
+    now = time.time()
+    monkeypatch.setattr(dock_server.time, "time", lambda: now + dock_server.ASK_GONE_S + 1)
+    assert _cards(api) == []
+    p.close()
+
+
+def test_question_releases_after_card_is_certain_for_a_while(monkeypatch):
+    import dock_server
+
+    p, t = _pipeline_with_track()
+    api = _dock_with(p)
+    t.identity, t.state = _identity(card_id="c1", certain=False), "uncertain"
+    _cards(api)
+    t.identity, t.state = _identity(card_id="c1", certain=True), "identified"
+    assert _cards(api)[0]["sticky"]  # gerade sicher geworden: Frage noch offen
+    now = time.time()
+    monkeypatch.setattr(dock_server.time, "time", lambda: now + dock_server.ASK_RELEASE_S + 1)
+    assert "sticky" not in _cards(api)[0]
+    p.close()
+
+
+def test_swap_needs_calm_region_and_two_checks():
+    p, t = _pipeline_with_track()
+    img = scene_with_card(QUAD)
+    from cardengine.pipeline import _signature
+
+    t.identity, t.state = _identity(), "identified"
+    t.signature = -_signature(img, t.corners)  # ganz anderer Inhalt
+    t.motion = 99.0  # Hand über der Karte
+    for i in range(5):
+        p._check_swaps(img, now=float(i * 2))
+    assert t.identity is not None  # bei Bewegung kein Urteil
+    t.motion = 0.0
+    p._check_swaps(img, now=20.0)
+    assert t.identity is not None  # ein Treffer reicht nicht
+    p._check_swaps(img, now=22.0)
+    assert t.identity is None and t.state == "new"
+    p.close()
+
+
+def test_user_rejected_spot_stays_rejected_on_motion():
+    from cardengine.tracking import CardTracker
+
+    p, t = _pipeline_with_track()
+    p.reject(t.id)
+    p.process(scene_with_card(QUAD), now=0.05)
+    assert t.user_rejected and t.state == "rejected"
+    CardTracker._unlock(t)
+    assert t.state == "rejected"
+    p.close()
+
+
+def test_moving_card_is_not_asked_yet():
+    p, t = _pipeline_with_track()
+    t.locked, t.still_frames = False, 0
+    t.identity, t.state = _identity(certain=False), "uncertain"
+    assert not _cards(_dock_with(p))[0]["needs_confirmation"]
+    p.close()
+
+
+def test_lost_card_is_revived_with_same_id_and_identity():
+    from cardengine.tracking import CardTracker, TrackerConfig
+
+    tr = CardTracker(TrackerConfig.facecam())
+    tr.update([Detection(order_corners(QUAD), 0.9)], 0.0)
+    t = tr.tracks[0]
+    t.identity, t.state = _identity(), "identified"
+    blank = np.full((720, 1280, 3), (60, 90, 120), np.uint8)
+    assert not tr.step(blank, 1.5)  # verloren (z. B. Hand darüber)
+    moved = QUAD + np.float32([25, 10])
+    tr.update([Detection(order_corners(moved), 0.9)], 2.0)
+    assert len(tr.tracks) == 1 and tr.tracks[0] is t and t.identity is not None
+    # Nach Ablauf der Merkzeit entsteht ein neuer Track
+    tr.step(blank, 4.0)
+    tr.step(blank, 9.0)
+    tr.update([Detection(order_corners(QUAD), 0.9)], 9.1)
+    assert tr.tracks[0] is not t
+
+
+def test_dismiss_hides_card_without_learning():
+    p, t = _pipeline_with_track()
+    api = _dock_with(p)
+    api.shared.learned = SimpleNamespace(add_negative=lambda *a, **k: (_ for _ in ()).throw(AssertionError("gelernt")),
+                                         counts=lambda: {})
+    t.identity, t.state = _identity(certain=False), "uncertain"
+    assert _cards(api)
+    assert api.dismiss("s1", t.id)["ok"]
+    p.process(scene_with_card(QUAD), now=0.05)
+    assert t.hidden and _cards(api) == []
     p.close()

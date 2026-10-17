@@ -384,6 +384,8 @@ class Session:
         hl = self.current_highlight()
         show_labels = self._labels_visible()
         for t in tracks:
+            if t.hidden and not st["debug"]:
+                continue  # im Dock entfernt
             label = self.label_for(t.id) if t.state != "rejected" else ""
             highlighted = bool(hl) and label == hl
             if t.identity is None and not st["debug"] and not highlighted and not (show_labels and t.state == "failed"):

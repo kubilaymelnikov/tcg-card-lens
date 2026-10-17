@@ -3,7 +3,12 @@
 Simuliert die HTTP-API aus docs/DOCK.md mit Fake-Daten, damit die Oberfläche ohne Engine/OBS
 entwickelt werden kann. Nur Python-Standardbibliothek.
 
-    python tools/dock_mock.py [--port 47839] [--host 127.0.0.1]
+    python tools/dock_mock.py [--port 47839] [--host 127.0.0.1] [--flaky]
+
+--flaky simuliert eine unruhige Engine: unsichere Karten fehlen zufällig für 1–3 Abfragen, wechseln ihren
+state (uncertain/failed/rejected), melden kurz needs_confirmation=false oder recheck=true, bekommen gelegentlich
+einen anderen Vorschlag; Karte D hält die Frage mit "sticky": true offen; /api/state liefert gelegentlich 500
+oder antwortet erst nach 4 s.
 
 Dann im Browser (oder als OBS-Browser-Dock) http://127.0.0.1:47839/ öffnen.
 """
@@ -120,6 +125,52 @@ def initial_state() -> dict:
 LOCK = threading.Lock()
 STATE = initial_state()
 START = time.time()
+FLAKY = False
+HIDDEN: dict[tuple, int] = {}  # (session, track) -> noch fehlende Abfragen (nur --flaky)
+
+
+def flaky_swap_suggestion(c: dict) -> None:
+    """Dauerhaft einen anderen Vorschlag setzen (bisheriger wandert zu den Alternativen)."""
+    if not c["candidates"]:
+        return
+    new = random.choice(c["candidates"])
+    info = BY_KEY[new["key"]]
+    old_key = c["key"]
+    c["candidates"] = [x for x in c["candidates"] if x["key"] != new["key"]]
+    if old_key in BY_KEY:
+        c["candidates"].append(cand(old_key, round(max(0.5, c["similarity"] - 0.02), 2)))
+    c.update(key=new["key"], name=info["name"], set_name=info["set_name"], set_code=info["set_code"],
+             number=info["number"], image=img_url(new["key"]), similarity=new["similarity"])
+
+
+def flaky_cards(sid: str, cards: list, origs: list) -> list:
+    out = []
+    for c, orig in zip(cards, origs):
+        if not orig["needs_confirmation"]:
+            out.append(c)
+            continue
+        k = (sid, c["track"])
+        if HIDDEN.get(k, 0) > 0:
+            HIDDEN[k] -= 1
+            continue
+        if random.random() < 0.12:
+            HIDDEN[k] = random.randint(1, 3) - 1
+            continue
+        if random.random() < 0.04:
+            flaky_swap_suggestion(orig)
+            c.update({x: orig[x] for x in ("key", "name", "set_name", "set_code", "number", "image",
+                                            "similarity", "candidates")})
+            c["candidates"] = copy.deepcopy(orig["candidates"])
+        if random.random() < 0.15:
+            c["state"] = random.choice(["uncertain", "failed", "rejected"])
+        if random.random() < 0.08:
+            c["needs_confirmation"] = False
+        if random.random() < 0.10:
+            c["recheck"] = True
+        if c["label"] == "D" and sid == "s1":
+            c["sticky"] = True
+        out.append(c)
+    return out
 
 
 def find(session_id, track):
@@ -144,6 +195,8 @@ def public_state() -> dict:
         for c in s["cards"]:
             v = c.pop("_v") + tick
             c["crop"] = f"/api/crop/{s['id']}/{c['track']}?v={v}"
+        if FLAKY:
+            s["cards"] = flaky_cards(s["id"], s["cards"], orig["cards"])
     return out
 
 
@@ -193,6 +246,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.send(404, b"dock.html fehlt", "text/plain; charset=utf-8")
             return
         if path == "/api/state":
+            if FLAKY:
+                r = random.random()
+                if r < 0.06:
+                    return self.json({"error": "simulierter Fehler"}, 500)
+                if r < 0.11:
+                    time.sleep(4.0)
             with LOCK:
                 self.json(public_state())
             return
@@ -251,6 +310,8 @@ class Handler(BaseHTTPRequestHandler):
             s, c = find(body.get("session"), body.get("track"))
             if not c:
                 return self.json({"ok": False, "error": "Karte nicht (mehr) vorhanden"}, 404)
+            if FLAKY and path in ("/api/confirm", "/api/reject") and HIDDEN.get((s["id"], c["track"]), 0) > 0:
+                return self.json({"ok": False, "error": "Karte nicht mehr im Bild"}, 409)
             if path == "/api/confirm":
                 key = body.get("key")
                 info = BY_KEY.get(key)
@@ -277,6 +338,11 @@ class Handler(BaseHTTPRequestHandler):
                 STATE["learned"]["negatives"] += 1
                 STATE["learned"]["dataset"] += 1
                 return self.json({"ok": True})
+            if path == "/api/dismiss":  # ✕: ohne Gründe ausblenden, nichts lernen
+                s["cards"].remove(c)
+                if s["highlight"] == c["label"]:
+                    s["highlight"] = None
+                return self.json({"ok": True})
             if path == "/api/refresh":
                 c["_v"] += 100
                 if c["key"]:
@@ -290,9 +356,13 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", type=int, default=47839)
     ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--flaky", action="store_true",
+                    help="unruhige Engine simulieren (fehlende Karten, State-Wechsel, 500er, Verzögerungen)")
     a = ap.parse_args()
+    global FLAKY
+    FLAKY = a.flaky
     srv = ThreadingHTTPServer((a.host, a.port), Handler)
-    print(f"Dock-Mock läuft: http://{a.host}:{a.port}/  (Strg+C beendet)", flush=True)
+    print(f"Dock-Mock läuft: http://{a.host}:{a.port}/{'  [flaky]' if FLAKY else ''}  (Strg+C beendet)", flush=True)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
