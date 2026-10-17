@@ -43,15 +43,15 @@ CATALOG = [
     {"key": "pokemon|sv2-missing", "name": "Bisasam", "set_name": "Entwicklungen in Paldea", "set_code": "PAL", "number": "001/193"},
     {"key": "pokemon|sv3pt5-1", "name": "Bisasam", "set_name": "151", "set_code": "MEW", "number": "001/165"},
     # Magic
-    {"key": "magic|lea-161", "name": "Lightning Bolt", "set_name": "Limited Edition Alpha", "set_code": "LEA", "number": "161"},
-    {"key": "magic|m10-146", "name": "Lightning Bolt", "set_name": "Magic 2010", "set_code": "M10", "number": "146"},
-    {"key": "magic|2xm-129", "name": "Lightning Bolt", "set_name": "Double Masters", "set_code": "2XM", "number": "129"},
-    {"key": "magic|c21-263", "name": "Sol Ring", "set_name": "Commander 2021", "set_code": "C21", "number": "263"},
-    {"key": "magic|cmr-472", "name": "Sol Ring", "set_name": "Commander Legends", "set_code": "CMR", "number": "472"},
-    {"key": "magic|ltc-284", "name": "Sol Ring", "set_name": "Tales of Middle-earth Commander", "set_code": "LTC", "number": "284"},
-    {"key": "magic|2xm-51", "name": "Counterspell", "set_name": "Double Masters", "set_code": "2XM", "number": "51"},
-    {"key": "magic|mh2-267", "name": "Counterspell", "set_name": "Modern Horizons 2", "set_code": "MH2", "number": "267"},
-    {"key": "magic|dmu-107", "name": "Sheoldred, the Apocalypse", "set_name": "Dominaria United", "set_code": "DMU", "number": "107"},
+    {"key": "mtg|lea-161", "name": "Lightning Bolt", "set_name": "Limited Edition Alpha", "set_code": "LEA", "number": "161"},
+    {"key": "mtg|m10-146", "name": "Lightning Bolt", "set_name": "Magic 2010", "set_code": "M10", "number": "146"},
+    {"key": "mtg|2xm-129", "name": "Lightning Bolt", "set_name": "Double Masters", "set_code": "2XM", "number": "129"},
+    {"key": "mtg|c21-263", "name": "Sol Ring", "set_name": "Commander 2021", "set_code": "C21", "number": "263"},
+    {"key": "mtg|cmr-472", "name": "Sol Ring", "set_name": "Commander Legends", "set_code": "CMR", "number": "472"},
+    {"key": "mtg|ltc-284", "name": "Sol Ring", "set_name": "Tales of Middle-earth Commander", "set_code": "LTC", "number": "284"},
+    {"key": "mtg|2xm-51", "name": "Counterspell", "set_name": "Double Masters", "set_code": "2XM", "number": "51"},
+    {"key": "mtg|mh2-267", "name": "Counterspell", "set_name": "Modern Horizons 2", "set_code": "MH2", "number": "267"},
+    {"key": "mtg|dmu-107", "name": "Sheoldred, the Apocalypse", "set_name": "Dominaria United", "set_code": "DMU", "number": "107"},
 ]
 BY_KEY = {c["key"]: c for c in CATALOG}
 
@@ -102,18 +102,18 @@ def initial_state() -> dict:
                  candidates=[cand("pokemon|sv3pt5-173", 0.79), cand("pokemon|sv4pt5-131", 0.74),
                              cand("pokemon|swsh45-SV013", 0.70)], state="uncertain"),
             card("B", 12, "pokemon|sv3pt5-6", game="pokemon", sim=0.96),
-            card("C", 13, "magic|lea-161", game="magic", sim=0.97, confirmed=True, method="bestätigt"),
-            card("D", 14, None, game="magic", name="Sol Ring", sim=0.88, needs=True,
+            card("C", 13, "mtg|lea-161", game="mtg", sim=0.97, confirmed=True, method="bestätigt"),
+            card("D", 14, None, game="mtg", name="Sol Ring", sim=0.88, needs=True,
                  reason="Druck unklar (mehrere Ausgaben gleich ähnlich)", state="uncertain",
-                 candidates=[cand("magic|c21-263", 0.88), cand("magic|cmr-472", 0.87), cand("magic|ltc-284", 0.86)]),
-            card("E", 15, "magic|dmu-107", game="magic", sim=0.93, method="embedding+ocr"),
+                 candidates=[cand("mtg|c21-263", 0.88), cand("mtg|cmr-472", 0.87), cand("mtg|ltc-284", 0.86)]),
+            card("E", 15, "mtg|dmu-107", game="mtg", sim=0.93, method="embedding+ocr"),
         ],
     }
     s2 = {
         "id": "s2", "source": "Kamera Hand", "highlight": None, "_hl_until": 0.0,
         "cards": [
             card("A", 21, "pokemon|sv3pt5-150", game="pokemon", sim=0.94, method="gelernt"),
-            card("B", 22, "magic|2xm-51", game="magic", sim=0.91, price=False),
+            card("B", 22, "mtg|2xm-51", game="mtg", sim=0.91, price=False),
             card("C", 23, "pokemon|sv2-missing", game="pokemon", sim=0.92),  # Referenzbild fehlt (404)
         ],
     }
