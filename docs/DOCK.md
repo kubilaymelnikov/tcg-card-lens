@@ -158,3 +158,52 @@ Body: `{"session", "x", "y"}` (Klickpunkt, normiert 0..1) **oder** `{"session", 
 `how`: `detektor` (gezielte Suche im vergrößerten Ausschnitt), `kontur` (klassische Kantensuche), `rahmen`
 (aufgezogener Rahmen, an die Kartenkanten angepasst), `vorhanden` (an der Stelle lag schon eine Karte – sie wird neu
 erkannt). Gefundene Karten werden normal verfolgt und identifiziert und erscheinen danach im Dock.
+
+## Pack-Opening-Session
+
+Ist im Filter der Pack-Opening-Modus an (siehe [PLUGIN.md](PLUGIN.md#pack-opening-modus)), zeigt das Dock den
+Abschnitt **Session**: Gesamtwert, Anzahl Karten und Hits, Startzeit, darunter die Liste (neueste zuerst; Zeit,
+Name, Set/Nummer, Preis, ★ für Hits, ✕ zum Entfernen falsch gezählter Einträge) und die Knöpfe **Neue Session**
+(zweiter Klick bestätigt – JS-Dialoge sind in OBS-Browser-Docks nicht verlässlich), **CSV exportieren** (speichert
+in der Engine) und **⤓** (Download im Browser). Bei mehreren Quellen folgt der Abschnitt der Quellenauswahl im Kopf.
+
+### `GET /api/state` (Erweiterung je Sitzung)
+
+```json
+"pack": {
+  "enabled": true,                 // Modus im Filter an (aus: Liste bleibt sichtbar, es wird nicht weiter gezählt)
+  "started": 1792233600.0,         // Unix-Zeit des Session-Starts
+  "threshold": 10.0,
+  "total": 213.4, "count": 12, "hits": 2,
+  "csv": "/api/pack/csv/s1",
+  "cards": [                       // neueste zuerst
+    {"id": 41, "track": 17, "key": "pokemon|sv3pt5-6", "game": "pokemon", "name": "Glurak ex",
+     "set_name": "151", "number": "006/165", "time": 1792233710.2, "price": 168.73, "currency": "EUR",
+     "variant": "normal", "hit": true, "image": "/api/card-image/pokemon/sv3pt5-6"}
+  ]
+}
+```
+
+`pack` ist `null`, wenn der Modus aus ist und für die Quelle noch nichts gesammelt wurde. `price` ist `null`, wenn
+die Karte keinen Cardmarket-Preis hat. Gezählt werden nur sicher erkannte Karten; dieselbe physische Karte
+(Track-ID + Kartenschlüssel) einmal.
+
+### `POST` (Body JSON, Antwort `{"ok": true, …}` oder `{"ok": false, "error": "…"}`)
+
+| Pfad | Body | Wirkung |
+|---|---|---|
+| `/api/pack/reset` | `{"session"}` | Neue Session. Eine nicht leere alte Session wird vorher als CSV gesichert; Antwort `{"ok": true, "saved": "<pfad>" \| null}`. |
+| `/api/pack/export` | `{"session"}` | CSV unter `engine/data/sessions/<Quelle>/<JJJJ-MM-TT_hhmmss>.csv` speichern (Startzeit der Session; gleicher Start = Datei wird überschrieben). Antwort `{"ok": true, "path": "…"}`; leere Session → Fehler. |
+| `/api/pack/remove` | `{"session", "entry"}` | Eintrag (`cards[].id`) entfernen. Meldet derselbe Track die Karte danach erneut, zählt sie wieder. |
+
+### `GET /api/pack/csv/<session>`
+Download der aktuellen Session (`text/csv`, `Content-Disposition: attachment`).
+
+**CSV-Format** (für deutsches Excel): UTF-8 mit BOM, Trennzeichen `;`, Dezimalkomma, Zeilenende CRLF, eine Kopfzeile:
+
+```
+Zeit;Spiel;Karte;Set;Nummer;Variante;Preis;Währung;Hit;Schlüssel
+2026-10-17 20:15:03;Pokémon;Glurak ex;151;006/165;normal;168,73;EUR;ja;pokemon|sv3pt5-6
+```
+
+`Preis` ist leer, wenn kein Preis vorliegt; `Hit` ist `ja` oder leer.

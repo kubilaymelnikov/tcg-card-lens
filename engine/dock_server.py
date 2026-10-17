@@ -112,6 +112,7 @@ class DockApi:
             cards.sort(key=lambda c: (len(c["label"]), c["label"]))
             entry = {"id": sess.sid, "source": sess.source, "highlight": sess.current_highlight(), "cards": cards}
             entry.update(self._preview(sess))
+            entry["pack"] = self._pack_state(sess)
             sessions.append(entry)
         try:
             rev = str(int(os.path.getmtime(DOCK_HTML)))
@@ -119,6 +120,68 @@ class DockApi:
             rev = None
         return {"engine": __version__, "status": self.shared.status, "learned": learned, "sessions": sessions,
                 "dock_rev": rev, "instance": INSTANCE}
+
+    # ---------------------------------------------------------------- Pack-Opening (Session-Liste)
+    def _pack(self, sid: str):
+        sess = self._session(sid)
+        if sess is None:
+            raise KeyError("Quelle nicht verbunden")
+        return sess, self.shared.pack_sessions.get(sess.source)
+
+    def _pack_state(self, sess) -> dict | None:
+        """Session der Quelle fürs Dock; None, wenn der Modus aus ist und noch nichts gesammelt wurde."""
+        if not hasattr(self.shared, "pack_sessions"):
+            return None
+        with self.shared.pack_lock:
+            ps = self.shared.pack_sessions.get(sess.source)
+            enabled = bool(sess.settings.get("pack_enabled"))
+            if ps is None and not enabled:
+                return None
+            data = ps.to_dict() if ps is not None else {"started": None, "threshold": None, "total": 0.0,
+                                                        "count": 0, "hits": 0, "cards": []}
+        for c in data["cards"]:
+            c["image"] = self._image_url(c["key"])
+        data["enabled"] = enabled
+        data["csv"] = f"/api/pack/csv/{sess.sid}"
+        return data
+
+    def pack_reset(self, sid: str) -> dict:
+        """Neue Session; eine nicht leere alte Session wird vorher als CSV gesichert."""
+        from cardengine.pack_opening import save_csv
+
+        sess, ps = self._pack(sid)
+        saved = None
+        with self.shared.pack_lock:
+            if ps is not None and ps.cards:
+                saved = save_csv(ps, sess.source)
+            sess.pack_reset()
+        return {"ok": True, "saved": saved}
+
+    def pack_export(self, sid: str) -> dict:
+        from cardengine.pack_opening import save_csv
+
+        sess, ps = self._pack(sid)
+        if ps is None or not ps.cards:
+            return {"ok": False, "error": "Session ist leer"}
+        with self.shared.pack_lock:
+            path = save_csv(ps, sess.source)
+        return {"ok": True, "path": path}
+
+    def pack_remove(self, sid: str, entry_id) -> dict:
+        _, ps = self._pack(sid)
+        with self.shared.pack_lock:
+            ok = ps is not None and ps.remove(int(entry_id))
+        return {"ok": True} if ok else {"ok": False, "error": "Eintrag nicht gefunden"}
+
+    def pack_csv(self, sid: str) -> tuple[bytes, str] | None:
+        """(CSV-Bytes mit BOM, Dateiname) für den Download."""
+        sess, ps = self._pack(sid)
+        if ps is None:
+            return None
+        with self.shared.pack_lock:
+            text = ps.to_csv()
+            name = time.strftime("session-%Y-%m-%d_%H%M%S.csv", time.localtime(ps.started))
+        return ("﻿" + text).encode("utf-8"), name
 
     def _preview(self, sess) -> dict:
         """Kamerabild-Vorschau: Bildgröße und Umrisse aller sichtbaren Karten (normiert 0..1)."""
@@ -485,6 +548,13 @@ def _handler(api: DockApi):
                     qs = parse_qs(url.query)
                     data = api.frame_jpeg(parts[2], int(qs.get("w", ["480"])[0]))
                     return self._send(200, data, "image/jpeg") if data else self._send(404, b"", "text/plain")
+                if parts[:3] == ["api", "pack", "csv"] and len(parts) == 4:
+                    res = api.pack_csv(parts[3])
+                    if res is None:
+                        return self._send(404, b"", "text/plain")
+                    data, name = res
+                    return self._send(200, data, "text/csv; charset=utf-8",
+                                      {"Content-Disposition": f'attachment; filename="{name}"'})
                 if parts[:2] == ["api", "crop"] and len(parts) == 4:
                     data = api.crop(parts[2], parts[3])
                     return self._send(200, data, "image/jpeg") if data else self._send(404, b"", "text/plain")
@@ -539,6 +609,12 @@ def _handler(api: DockApi):
                     return self._json(api.highlight(body["session"], body.get("label")))
                 if path == "/api/forget":
                     return self._json(api.forget(body["key"]))
+                if path == "/api/pack/reset":
+                    return self._json(api.pack_reset(body["session"]))
+                if path == "/api/pack/export":
+                    return self._json(api.pack_export(body["session"]))
+                if path == "/api/pack/remove":
+                    return self._json(api.pack_remove(body["session"], body["entry"]))
                 self._json({"ok": False, "error": "unbekannte Aktion"}, 404)
             except Exception as err:
                 traceback.print_exc()

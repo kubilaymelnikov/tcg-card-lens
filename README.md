@@ -8,6 +8,9 @@
 - **Keine falschen Preise:** Ist der genaue Druck nicht sicher, steht „Druck unsicher – kein Preis“
 - **Karten-Dock in OBS:** unsichere Karten bestätigen oder korrigieren, Karte im Video hervorheben, Cardmarket-Link
 - **Lernt aus Bestätigungen:** einmal bestätigt, wird dieselbe Karte unter deinem Licht sofort sicher erkannt
+- **Pack-Opening-Modus:** wertvolle Karten (ab einstellbarer Schwelle, Standard 10 €) lösen einen Hit-Effekt aus –
+  goldener Rahmen, Banner „HIT! 168,73 €“, auf Wunsch Szenenwechsel und Sound; dazu Session-Liste mit Gesamtwert
+  und CSV-Export
 
 > Status: Version 0.2 – im Alltag nutzbar, aber jung. Rückmeldungen und Fehlerberichte sind willkommen.
 
@@ -41,6 +44,11 @@ legen – dann installiert das Setup die Pakete daraus.
   - **↻ Drehen**, wenn eine Karte quer erkannt wurde, **⟳** neu erkennen, **✕** ausblenden.
 - Bestätigungen werden lokal als Referenz gelernt und als Trainingsbeispiele gespeichert
   (`engine/data/learned`, bleibt auf deinem Rechner).
+- **Pack-Opening:** Im Filter unter *Pack-Opening* einschalten. Jede **sicher** erkannte Karte mit Preis zählt in die
+  Session (dieselbe Karte nur einmal), ab der Hit-Schwelle gibt es den Hit-Effekt. Im Video stehen „Session-Wert“ und
+  „Letzte Hits“, im Dock der Abschnitt **Session** mit Liste, Summe, **Neue Session** und **CSV exportieren**
+  (`engine/data/sessions`). Optional wechselt OBS bei einem Hit die Szene (und nach einigen Sekunden zurück) oder
+  spielt eine Medienquelle als Sound ab. Unsichere Drucke zählen nie – kein Preis, kein Hit.
 
 ## Wie es funktioniert
 

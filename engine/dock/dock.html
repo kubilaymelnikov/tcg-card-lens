@@ -224,6 +224,25 @@ figure[data-r="fcrop"] { position: relative; }
 .search input:focus, .search select:focus { outline: none; border-color: var(--accent); }
 .pk-foot { display: flex; justify-content: flex-end; margin-top: 5px; }
 
+/* ---------- Pack-Opening-Session ---------- */
+#sec-pack h2 { color: var(--hl); }
+.pk { background: var(--tile); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; margin-bottom: 6px; }
+.pk-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pk-total { font-size: 18px; font-weight: 700; }
+.pk-meta { color: var(--muted); font-size: 12px; }
+.pk-head .spacer { flex: 1 1 auto; }
+.pk-list { list-style: none; margin: 6px 0 0; padding: 0; max-height: 260px; overflow-y: auto; }
+.pk-row { display: grid; grid-template-columns: 54px 1fr auto 20px; gap: 6px; align-items: center; padding: 3px 2px; border-top: 1px solid #33363f; }
+.pk-row.hit { background: linear-gradient(90deg, rgba(255,215,90,.13), transparent 80%); }
+.pk-row.hit .pk-name::before { content: "★ "; color: var(--hl); }
+.pk-time { color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+.pk-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pk-set { color: var(--muted); font-size: 11px; }
+.pk-price { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pk-row.hit .pk-price { color: var(--hl); font-weight: 600; }
+.pk-del { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--dim); cursor: pointer; }
+.pk-del:hover, .pk-del:focus-visible { background: #e5484d; color: #fff; }
+.pk-off { color: var(--warn); font-size: 12px; margin-top: 4px; }
 footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 1px solid #2a2c34; margin-top: 8px; }
 
 #toast {
@@ -345,6 +364,10 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     <h2>Erkannt <span class="count" id="cnt-seen">0</span></h2>
     <div class="grid grid-seen" id="grid-seen"></div>
     <div class="empty" id="empty-seen" hidden>Keine Karten im Bild.</div>
+  </section>
+  <section id="sec-pack" hidden>
+    <h2>Session</h2>
+    <div id="pack-list"></div>
   </section>
 </main>
 <footer>Bestätigungen werden lokal gelernt und als Trainingsdaten gespeichert.</footer>
@@ -530,6 +553,7 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
       ingest(state);
       renderHead();
       layout();
+      renderPack(state);
     }).catch(function (e) {
       failCount++;
       if (e && !(e.name === 'AbortError' || /^HTTP /.test(e.message || '') || e instanceof TypeError) && window.console) {
@@ -543,6 +567,93 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     });
   }
   function pollNow() { poll(); }
+
+  // ---------- Pack-Opening-Session (je Quelle: Summe, Liste, Neue Session, CSV) ----------
+  var packSig = '';
+  function renderPack(s) {
+    var sessions = (s && Array.isArray(s.sessions) ? s.sessions : []).filter(function (x) {
+      return x.pack && (selSession === '*' || x.id === selSession || s.sessions.length < 2);
+    });
+    var sig = JSON.stringify(sessions.map(function (x) {
+      var p = x.pack;
+      return [x.id, x.source, p.enabled, p.started, p.total, p.cards.map(function (c) { return [c.id, c.price, c.hit, c.name]; })];
+    }));
+    show($('sec-pack'), sessions.length > 0);
+    if (sig === packSig) return;
+    packSig = sig;
+    var root = $('pack-list');
+    root.textContent = '';
+    sessions.forEach(function (x) { root.appendChild(packBox(x, sessions.length > 1)); });
+  }
+  function packBox(x, multi) {
+    var p = x.pack, box = el('div', 'pk');
+    var head = el('div', 'pk-head');
+    head.appendChild(el('span', 'pk-total', money(p.total || 0, 'EUR')));
+    var meta = p.count + (p.count === 1 ? ' Karte' : ' Karten') + ' · ' + p.hits + (p.hits === 1 ? ' Hit' : ' Hits');
+    if (multi) meta = (x.source || x.id) + ' · ' + meta;
+    if (p.started) meta += ' · seit ' + clock(p.started * 1000);
+    head.appendChild(el('span', 'pk-meta', meta));
+    head.appendChild(el('span', 'spacer'));
+    var bNew = el('button', 'btn sm', 'Neue Session');
+    bNew.type = 'button';
+    bNew.title = 'Liste leeren und neu zählen (eine nicht leere Session wird vorher als CSV gesichert)';
+    bNew.addEventListener('click', function () {
+      // Zweiter Klick bestätigt (JS-Dialoge sind in OBS-Browser-Docks nicht verlässlich)
+      if (p.count && !bNew._armed) {
+        bNew._armed = true; bNew.textContent = 'Wirklich neu?'; bNew.classList.add('danger');
+        setTimeout(function () { bNew._armed = false; bNew.textContent = 'Neue Session'; bNew.classList.remove('danger'); }, 3000);
+        return;
+      }
+      bNew.disabled = true;
+      post('/api/pack/reset', { session: x.id }).then(function (r) {
+        toast(r && r.saved ? 'Neue Session – alte gesichert: ' + r.saved : 'Neue Session gestartet.', 'ok');
+        pollNow();
+      }, function (err) { toast(String(err && err.message || err), 'err'); bNew.disabled = false; });
+    });
+    var bCsv = el('button', 'btn sm', 'CSV exportieren');
+    bCsv.type = 'button';
+    bCsv.disabled = !p.count;
+    bCsv.title = 'Speichert die Liste unter engine/data/sessions/ (Excel-tauglich: Semikolon, Dezimalkomma)';
+    bCsv.addEventListener('click', function () {
+      post('/api/pack/export', { session: x.id }).then(function (r) {
+        toast('CSV gespeichert: ' + (r && r.path || ''), 'ok');
+      }, function (err) { toast(String(err && err.message || err), 'err'); });
+    });
+    var aDl = el('a', 'btn sm', '⤓');
+    aDl.href = p.csv; aDl.setAttribute('download', ''); aDl.title = 'CSV herunterladen (im Browser)';
+    head.appendChild(bNew); head.appendChild(bCsv); head.appendChild(aDl);
+    box.appendChild(head);
+    if (!p.enabled) box.appendChild(el('div', 'pk-off', 'Pack-Opening ist im OBS-Filter aus – es wird nicht weiter gezählt.'));
+    if (!p.cards.length) {
+      box.appendChild(el('div', 'empty', 'Noch keine sicher erkannte Karte in dieser Session.'));
+      return box;
+    }
+    var ul = el('ul', 'pk-list');
+    p.cards.forEach(function (c) {
+      var li = el('li', 'pk-row' + (c.hit ? ' hit' : ''));
+      li.appendChild(el('span', 'pk-time', clock(c.time * 1000)));
+      var nm = el('div', null);
+      nm.style.minWidth = '0';
+      var n1 = el('div', 'pk-name', c.name); n1.title = c.name;
+      nm.appendChild(n1);
+      var set = [c.set_name, c.number ? 'Nr. ' + c.number : null].filter(Boolean).join(' · ');
+      if (set) nm.appendChild(el('div', 'pk-set', set));
+      li.appendChild(nm);
+      li.appendChild(el('span', 'pk-price', typeof c.price === 'number' ? money(c.price, c.currency) : '–'));
+      var del = el('button', 'pk-del', '✕');
+      del.type = 'button'; del.title = 'Aus der Session entfernen (falsch gezählt)';
+      del.setAttribute('aria-label', 'Eintrag ' + c.name + ' entfernen');
+      del.addEventListener('click', function () {
+        del.disabled = true;
+        post('/api/pack/remove', { session: x.id, entry: c.id }).then(function () { pollNow(); },
+          function (err) { toast(String(err && err.message || err), 'err'); del.disabled = false; });
+      });
+      li.appendChild(del);
+      ul.appendChild(li);
+    });
+    box.appendChild(ul);
+    return box;
+  }
 
   function clock(ms) {
     try { return new Date(ms).toLocaleTimeString('de-DE'); } catch (e) { return ''; }

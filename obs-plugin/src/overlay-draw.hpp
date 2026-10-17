@@ -34,6 +34,7 @@ private:
 		float thickness = 3.f;
 		std::string label;
 		bool highlight = false;
+		bool hit = false;
 		std::vector<PanelRef> panels;
 		bool fresh = true;
 	};

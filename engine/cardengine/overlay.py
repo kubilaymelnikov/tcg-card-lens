@@ -230,3 +230,100 @@ class OverlayRenderer:
         src = rgba[: region.shape[0], : region.shape[1]]
         a = src[..., 3:4].astype(np.float32) / 255
         region[:] = (src[..., 2::-1] * a + region * (1 - a)).astype(np.uint8)
+
+
+# ---------------------------------------------------------------- Pack-Opening (Bildschirm-Panels)
+HIT_GOLD = (255, 200, 40)
+_GAME_SHORT = {"pokemon": "Pokémon", "mtg": "Magic", "ygo": "Yu-Gi-Oh!"}
+
+
+def render_hit_banner(name: str, price: float, set_line: str, frame_w: int, scale: float = 1.0) -> np.ndarray:
+    """Großes Banner „HIT! 168,73 €“ mit Kartenname – goldener Rand, dunkler Grund."""
+    s = max(0.5, frame_w / 1920 * scale)
+    f_big, f_name, f_small = _font(int(64 * s), True), _font(int(30 * s), True), _font(int(20 * s))
+    head = f"HIT!  {fmt_eur(price)}"
+    probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    if probe.textlength(name, font=f_name) > 900 * s:
+        while len(name) > 4 and probe.textlength(name + "…", font=f_name) > 900 * s:
+            name = name[:-1]
+        name += "…"
+    tw = max(probe.textlength(head, font=f_big), probe.textlength(name, font=f_name),
+             probe.textlength(set_line, font=f_small))
+    pad, border = int(28 * s), max(3, int(6 * s))
+    w, h = int(tw + 2 * pad), int(pad * 2 + 64 * s * 1.15 + 30 * s * 1.3 + (20 * s * 1.4 if set_line else 0))
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle([0, 0, w - 1, h - 1], radius=int(22 * s), fill=(18, 14, 4, 235),
+                        outline=HIT_GOLD + (255,), width=border)
+    y = pad - int(6 * s)
+    d.text((w / 2, y), head, font=f_big, fill=HIT_GOLD + (255,), anchor="ma")
+    y += int(64 * s * 1.15)
+    d.text((w / 2, y), name, font=f_name, fill=(255, 255, 255, 255), anchor="ma")
+    if set_line:
+        d.text((w / 2, y + int(30 * s * 1.3)), set_line, font=f_small, fill=(220, 210, 180, 255), anchor="ma")
+    return np.array(img)
+
+
+def render_pack_total(total: float, count: int, hits: int, frame_w: int, scale: float = 1.0) -> np.ndarray:
+    """Kleines Panel „Session-Wert 213,40 €“ + „12 Karten · 2 Hits“."""
+    s = max(0.5, frame_w / 1920 * scale)
+    f_lab, f_big, f_small = _font(int(18 * s)), _font(int(36 * s), True), _font(int(18 * s))
+    sub = f"{count} {'Karte' if count == 1 else 'Karten'} · {hits} {'Hit' if hits == 1 else 'Hits'}"
+    probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    pad = int(14 * s)
+    tw = max(probe.textlength("Session-Wert", font=f_lab), probe.textlength(fmt_eur(total), font=f_big),
+             probe.textlength(sub, font=f_small))
+    w, h = int(tw + 2 * pad), int(pad * 2 + 18 * s * 1.3 + 36 * s * 1.2 + 18 * s * 1.2)
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle([0, 0, w - 1, h - 1], radius=int(12 * s), fill=(12, 14, 22, 220))
+    y = pad
+    d.text((pad, y), "Session-Wert", font=f_lab, fill=(170, 176, 190, 255))
+    y += int(18 * s * 1.3)
+    d.text((pad, y), fmt_eur(total), font=f_big, fill=(255, 255, 255, 255))
+    y += int(36 * s * 1.2)
+    d.text((pad, y), sub, font=f_small, fill=HIT_GOLD + (255,) if hits else (200, 204, 215, 255))
+    return np.array(img)
+
+
+def render_recent_hits(hits: list[tuple[str, float]], frame_w: int, scale: float = 1.0) -> np.ndarray:
+    """Liste „Letzte Hits“: je Zeile Name und Preis (neueste zuerst)."""
+    s = max(0.5, frame_w / 1920 * scale)
+    f_lab, f_row = _font(int(18 * s)), _font(int(22 * s), True)
+    probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    pad, gap = int(14 * s), int(18 * s)
+    rows = []
+    for name, price in hits:
+        if len(name) > 28:
+            name = name[:27] + "…"
+        rows.append((name, fmt_eur(price)))
+    star = int(22 * s * 1.05)  # Stern als Polygon (★ fehlt in Segoe UI Bold)
+    name_w = max([star + probe.textlength(r[0], font=f_row) for r in rows] + [probe.textlength("Letzte Hits", font=f_lab)])
+    price_w = max([probe.textlength(r[1], font=f_row) for r in rows] + [0])
+    line = int(22 * s * 1.35)
+    w, h = int(name_w + gap + price_w + 2 * pad), int(pad * 2 + 18 * s * 1.4 + line * len(rows))
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle([0, 0, w - 1, h - 1], radius=int(12 * s), fill=(12, 14, 22, 220))
+    d.text((pad, pad), "Letzte Hits", font=f_lab, fill=(170, 176, 190, 255))
+    y = pad + int(18 * s * 1.4)
+    for left, right in rows:
+        _star(d, pad + star * 0.4, y + 22 * s * 0.62, star * 0.42)
+        d.text((pad + star, y), left, font=f_row, fill=HIT_GOLD + (255,))
+        d.text((w - pad, y), right, font=f_row, fill=(255, 255, 255, 255), anchor="ra")
+        y += line
+    return np.array(img)
+
+
+def _star(d: ImageDraw.ImageDraw, cx: float, cy: float, r: float) -> None:
+    pts = []
+    for i in range(10):
+        a = -np.pi / 2 + i * np.pi / 5
+        rr = r if i % 2 == 0 else r * 0.45
+        pts.append((cx + rr * np.cos(a), cy + rr * np.sin(a)))
+    d.polygon(pts, fill=HIT_GOLD + (255,))
+
+
+def set_line(game: str | None, set_name: str | None, number: str | None) -> str:
+    parts = [p for p in (_GAME_SHORT.get(game or "", ""), set_name, f"#{number}" if number else None) if p]
+    return " · ".join(parts)

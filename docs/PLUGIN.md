@@ -37,6 +37,7 @@ die Inferenz per ONNX Runtime ins Plugin wandern, ohne das Protokoll zu ändern.
 | `settings` | `settings` (bei jeder Änderung vollständig) |
 | `frame` | `seq`, `slot`, `width`, `height`, `stride`, `ts` – Bild liegt im Slot; Engine verarbeitet nur das jeweils neueste |
 | `snapshot` | manueller Debug-Snapshot (Button) |
+| `pack_reset` | Pack-Opening: neue Session für diese Quelle (Button „Neue Session starten“) |
 | `bye` | – |
 
 **Engine → Plugin**
@@ -49,6 +50,14 @@ die Inferenz per ONNX Runtime ins Plugin wandern, ohne das Protokoll zu ändern.
 
 Panel-Bilder (`data`, RGBA, Base64) werden nur gesendet, wenn sich `ver` für einen `key` ändert; das Plugin
 hält eine Textur je `key` vor. Positionen berechnet das Plugin pro Frame aus den Ecken (Name über, Preis unter der Karte).
+
+**Optionale Felder im `result`** (ältere Plugins ignorieren sie, ältere Engines lassen sie weg):
+
+| Feld | Inhalt |
+|---|---|
+| `tracks[].hit` | `true`, solange der Hit-Effekt der Karte läuft → Plugin zeichnet einen goldenen, pulsierenden Rahmen (~3 Hz, Dicke × 1,5…3,5) mit zwei Lagen Goldschein. `color` ist dann schon Gold `[255,200,40]`. |
+| `screen_panels[]` | Bildschirm-Panels (`anchor: "screen"`), zusätzlich `pos`: `top_left` · `top_center` · `top_right` · `bottom_left` · `bottom_right` (fehlt = `bottom_left`). Panels mit gleicher `pos` stapelt das Plugin in Listenreihenfolge (oben → nach unten, unten → nach oben), 10 px Rand. Keys: `debug` (Statuszeile), `pack:banner` (Hit-Banner, `top_center`), `pack:total` (Session-Wert), `pack:hits` (Letzte Hits). |
+| `events[]` | Einmalige Ereignisse, derzeit nur `{"type": "hit", "track", "key", "name", "price", "currency"}`. Das Plugin sammelt sie in einer eigenen Warteschlange (gehen nicht verloren, wenn ein Ergebnis vom nächsten überholt wird) und löst Szenenwechsel/Sound aus. |
 
 ## Einstellungen im OBS-Filter
 
@@ -65,10 +74,65 @@ hält eine Textur je `key` vor. Positionen berechnet das Plugin pro Frame aus de
 | Overlay | Kartenname / Preis / Preisverlauf anzeigen | |
 | | Zeitraum Preisverlauf (30/90/180 Tage) | |
 | | Skalierung, Rahmenstärke, Farbe Pokémon, Farbe Magic, Farbe Yu-Gi-Oh | |
+| Pack-Opening | Pack-Opening-Modus aktiv (`pack_enabled`, Standard aus) | Hits erkennen, Session zählen, Panels zeigen |
+| | Hit-Schwelle (`pack_threshold`, Standard 10 €) | sicher erkannte Karte mit Preis **ab** diesem Wert = Hit |
+| | Hit-Effekt (`hit_effect`): goldener Rahmen + Banner / nur Rahmen / nur Banner / kein Effekt | |
+| | Dauer des Hit-Effekts (`hit_duration`, 1–10 s, Standard 3 s) | |
+| | Panels „Session-Wert“ / „Letzte Hits“ (`pack_show_total`, `pack_show_hits`), Position (`pack_panel_pos`) | |
+| | Bei Hit zu Szene wechseln, nach Sekunden zurückwechseln (0 = bleiben, Standard 8 s) | nur Plugin (obs-frontend-api), nicht an die Engine |
+| | Bei Hit Medienquelle abspielen | nur Plugin: `obs_source_media_restart` auf die gewählte Medienquelle |
+| | Neue Session starten (Button) | sendet `pack_reset` |
 | Debug | Debug-Anzeige | Roh-Detektionen, Track-Status, Messwerte |
 | | Snapshot jetzt (Button) | speichert Bild + Erkennungsdaten |
 | | Automatische Snapshots, Speicherlimit (MB) | Engine speichert auffällige Situationen (unsicher, fehlgeschlagen, Kartentausch), älteste werden bei Überschreiten gelöscht |
 | Engine | Adresse/Port, Engine automatisch starten | |
+
+## Pack-Opening-Modus
+
+Logik in `engine/cardengine/pack_opening.py`, eingebunden in `server.py` (`Session.pack_observe` /
+`Session.pack_panels`), Dock-Teil in [DOCK.md](DOCK.md#pack-opening-session).
+
+- **Was zählt:** nur Karten mit sicherer Identität (`certain` und `card_id`) – derselbe Grundsatz wie beim Preis.
+  Unsichere Drucke kommen nie in die Liste und lösen nie einen Hit aus. Karten ohne Cardmarket-Preis werden gezählt
+  (Preis „–“), tragen aber nichts zur Summe bei. Im Dock ausgeblendete oder als „keine Karte“ markierte Tracks zählen nicht.
+- **Keine Duplikate:** Schlüssel ist (Track-ID, Kartenschlüssel). Dieselbe Karte, die liegen bleibt, kurz verdeckt
+  wird oder wieder aufgenommen wird (gleiche Track-ID), zählt einmal. Ein zweites Exemplar (eigener Track) oder eine
+  neue Karte an derselben Stelle (Tausch → neue Identität) zählt neu. Bestätigt der Nutzer im Dock für einen Track eine
+  **andere** Karte, ersetzt das den bisherigen Eintrag (Fehlerkennung), statt doppelt zu zählen. Falsch Gezähltes
+  lässt sich im Dock entfernen (✕).
+- **Hit:** Eintrag mit Preis ≥ Schwelle. Wird genau einmal gemeldet – auch wenn der Preis erst nach der Identität
+  ankommt. Die Schwelle gilt für neue Hits; bereits gemeldete bleiben Hits.
+- **Session:** je Quellname in der Engine (überlebt ein Neuverbinden des Filters, nicht den Neustart der Engine).
+  Sie beginnt beim ersten Frame mit eingeschaltetem Modus; „Neue Session“ (Filter-Button oder Dock) leert sie.
+- **Effekt im Video:** goldener Pulsrahmen um die Karte und Banner „HIT! 168,73 €“ mit Name und Set oben mittig, für
+  `hit_duration` Sekunden. Text rendert ausschließlich die Engine (RGBA-Panels), das Plugin zeichnet nur Texturen und
+  Linien.
+- **Szenenwechsel / Sound:** löst das Plugin im UI-Thread aus (`obs_queue_task(OBS_TASK_UI)`, nie aus dem
+  Grafik-Thread). Szenenwechsel über `obs_frontend_set_current_scene` – im Studio-Modus ist das ein Übergang ins
+  Programm. Zurückgewechselt wird nur, wenn noch die Hit-Szene läuft (sonst hat jemand bewusst umgeschaltet); bei
+  mehreren Hits in Folge bleibt die ursprüngliche Szene das Ziel. Der Sound ist eine **Medienquelle**, die in einer
+  laufenden Szene liegen muss (sonst wird ihr Ton nicht gemischt): z. B. in der Kamera-Szene eine Medienquelle
+  `Hit-Sound` mit „Wiedergabe neu starten, wenn Quelle aktiv wird“ **aus** und ohne Schleife; das Plugin startet sie
+  per `obs_source_media_restart` neu.
+- Build: Das Plugin linkt `obs-frontend-api` (`ENABLE_FRONTEND_API=ON`, Standard). Ohne bleibt alles außer dem
+  Szenenwechsel funktionsfähig.
+
+### Live in OBS testen
+
+1. Plugin bauen und installieren (`obs-plugin/tools/install-plugin.ps1`), OBS neu starten (Engine startet mit).
+2. Filter **TCG Card Lens** der Kamera-Quelle öffnen → Gruppe **Pack-Opening** → Modus an. Zum schnellen Test die
+   Hit-Schwelle auf z. B. 0,50 € senken.
+3. Oben rechts erscheint „Session-Wert 0,00 € · 0 Karten · 0 Hits“.
+4. Eine Karte mit bekanntem Preis vor die Kamera halten. Sobald sie sicher erkannt ist (Name ohne „?“, Preis im
+   Overlay), steigt der Session-Wert; liegt der Preis über der Schwelle: goldener Pulsrahmen + Banner für ~3 s,
+   „Letzte Hits“ erscheint, im OBS-Log steht `Hit: <Name> <Preis> EUR`.
+5. Karte weglegen und wieder zeigen: Liegt sie noch im Bild (gleicher Track), zählt sie nicht erneut.
+6. Dock öffnen (`http://127.0.0.1:47830/`) → Abschnitt **Session**: Liste mit Zeit, Name, Preis, ★ für Hits.
+   **CSV exportieren** → `engine/data/sessions/<Quelle>/<Start>.csv` (in Excel öffnen: Semikolon, Dezimalkomma).
+   **Neue Session** (zweimal klicken) sichert die alte Liste als CSV und beginnt neu.
+7. Szenenwechsel: eine Szene „Hit“ anlegen, im Filter als Ziel wählen, Rückwechsel 5 s → Hit auslösen.
+   Sound: Medienquelle mit kurzem Jingle in die Kamera-Szene legen, im Filter wählen → Hit auslösen.
+8. Unsicherer Druck (Name mit „?“, „Druck unsicher – kein Preis“) darf **nie** zählen oder einen Hit auslösen.
 
 ## Debug-Snapshots (kontinuierliche Verbesserung)
 
