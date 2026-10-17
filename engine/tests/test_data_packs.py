@@ -131,8 +131,11 @@ def test_build_and_install_pack_roundtrip(tmp_path, data):
 
     done = install_packs(["pokemon", "mtg"], NAME, pack_dir=out, url="https://x/PLATZHALTER")
     assert set(done) == {"pokemon", "mtg"}
-    assert Catalog().count("pokemon") == 3 and Catalog().count("mtg") == 2
-    assert Catalog().get("mtg", "m1").name == "Karte"
+    # Pokémon (TCGdex, MIT) bringt den Katalog mit; Magic (Scryfall) nur Embeddings – Katalog kommt von der Quelle
+    assert Catalog().count("pokemon") == 3 and Catalog().count("mtg") == 0
+    with zipfile.ZipFile(os.path.join(out, entries[1]["file"])) as z:
+        assert sorted(z.namelist()) == ["index.npz", "manifest.json"]
+        assert json.loads(z.read("manifest.json"))["catalog"] is False
     idx = EmbeddingIndex.load(NAME, games=["pokemon", "mtg"])
     src = EmbeddingIndex.load(NAME, index_dir=idx_dir)
     assert sorted(idx.keys) == sorted(src.keys)
@@ -190,7 +193,7 @@ def test_placeholder_or_unreachable_url_does_not_raise(data, monkeypatch):
 
     monkeypatch.setattr(requests, "get", boom)
     msgs = []
-    assert install_packs(["pokemon"], NAME, url=data_packs.DEFAULT_PACK_URL, log=msgs.append) == {}
+    assert install_packs(["pokemon"], NAME, url="https://github.com/PLATZHALTER/x/releases", log=msgs.append) == {}
     assert any("Platzhalter" in m for m in msgs)
     assert install_packs(["pokemon"], NAME, url="https://example.invalid/packs", log=msgs.append) == {}
     assert any("nicht erreichbar" in m for m in msgs)

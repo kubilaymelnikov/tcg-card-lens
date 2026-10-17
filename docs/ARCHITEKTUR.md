@@ -3,7 +3,7 @@
 Stand: 2026-10-17. Ziel: natives OBS-Studio-Filter-Plugin, das Pokémon- und Magic-Karten lokal per GPU erkennt,
 identifiziert, verfolgt und mit Cardmarket-Preisen direkt im Videobild überlagert.
 
-Der bisherige Web-Prototyp (`server/`, `public/`) bleibt als Referenz erhalten. Die neue Pipeline entsteht in
+Der frühere Web-Prototyp (Browser + Node.js, `server/`, `public/`) ist nicht mehr Teil des Stands; er liegt in der Git-Historie (vor Version 0.2.0). Die neue Pipeline entsteht in
 `engine/` (Python-Prototyp, Phase 1–2) und später `obs-plugin/` (C++, Phase 3).
 
 ## 1. Zielsystem

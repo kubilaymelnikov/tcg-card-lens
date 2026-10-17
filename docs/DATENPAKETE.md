@@ -85,21 +85,22 @@ Der Installer schreibt die Datei über `setup-engine.ps1 -Games … -Languages �
 gewählten Spiele und lädt die Namenslisten der gewählten Sprachen vorab. Bekannte Spiele stehen in
 `cardengine/config.py` (`GAMES`), den Katalog-Aufbau je Spiel regelt `maintenance.CATALOG_BUILDERS`.
 
-## Hosting (später: GitHub-Releases)
+## Hosting: GitHub-Releases
 
-`DEFAULT_PACK_URL` ist ein **Platzhalter** (`…/PLATZHALTER/…`), weil das Repository noch nicht veröffentlicht ist.
-Solange er gilt, greift die Engine nicht aufs Netz zu und baut lokal auf. Für die Veröffentlichung:
+`DEFAULT_PACK_URL` zeigt auf `https://github.com/kubilaymelnikov/tcg-card-lens/releases/latest/download` – also
+immer auf die Assets des neuesten Releases. Für ein neues Release:
 
 1. Pakete bauen (siehe oben).
 2. Einen Release anlegen und alle ZIPs sowie `packs.json` als Assets hochladen, z. B. mit
-   `gh release create daten-20261017 D:\release\*`.
-3. `DEFAULT_PACK_URL` auf `https://github.com/<besitzer>/tcg-card-lens/releases/latest/download` setzen. GitHub
-   leitet dort auf die Assets des neuesten Releases weiter, deshalb reicht ein fester Dateiname `packs.json`.
-   Die Paketdateien tragen das Datum im Namen.
+   `gh release create v0.3.0 installer\Output\*.exe installer\Output\packs\*`.
+   GitHub leitet `…/releases/latest/download/packs.json` auf das Asset des neuesten Releases weiter; die
+   Paketdateien tragen Spiel, Modell und Version im Namen. Jedes Release muss daher **alle** Pakete enthalten.
 
 Assets bis 2 GB sind möglich, die Pakete liegen weit darunter.
-Vor der Veröffentlichung klären: Lizenzhinweise zu Katalogdaten (Scryfall, TCGdex) und zu den Embeddings
-(abgeleitete Merkmalsvektoren, keine Bilder; Modell unter DINOv3-Lizenz) in `NOTICE.md` ergänzen.
+**Katalogdaten nur, wo erlaubt** (`data_packs.CATALOG_IN_PACK`): Das Pokémon-Paket enthält den Katalog (TCGdex,
+MIT-Lizenz). Magic- und Yu-Gi-Oh-Pakete enthalten nur die selbst berechneten Embeddings – Scryfall bittet, Daten
+nicht neu zu verpacken, YGOPRODeck untersagt die Weitergabe. Deren Katalog lädt die Wartung direkt von der Quelle
+(Minuten); Bilder laden und einbetten entfällt trotzdem, weil die Embeddings schon da sind. Hinweise in `NOTICE.md`.
 
 ## Update-Strategie
 

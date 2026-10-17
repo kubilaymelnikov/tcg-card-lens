@@ -46,6 +46,8 @@ Source: "{#Root}\obs-plugin\data\locale\*.ini"; DestDir: "{commonappdata}\obs-st
 Source: "{#Root}\engine\cardengine\*"; DestDir: "{app}\engine\cardengine"; Excludes: "__pycache__,*.pyc"; Flags: ignoreversion recursesubdirs
 Source: "{#Root}\engine\tools\*.py"; DestDir: "{app}\engine\tools"; Flags: ignoreversion
 Source: "{#Root}\engine\server.py"; DestDir: "{app}\engine"; Flags: ignoreversion
+Source: "{#Root}\engine\dock_server.py"; DestDir: "{app}\engine"; Flags: ignoreversion
+Source: "{#Root}\engine\dock\*"; DestDir: "{app}\engine\dock"; Flags: ignoreversion recursesubdirs
 Source: "{#Root}\engine\run.py"; DestDir: "{app}\engine"; Flags: ignoreversion
 Source: "{#Root}\engine\requirements.txt"; DestDir: "{app}\engine"; Flags: ignoreversion
 Source: "{#Root}\engine\setup-engine.ps1"; DestDir: "{app}\engine"; Flags: ignoreversion
@@ -53,6 +55,7 @@ Source: "{#Root}\engine\start-engine.cmd"; DestDir: "{app}\engine"; Flags: ignor
 Source: "{#Root}\engine\stop-engine.ps1"; DestDir: "{app}\engine"; Flags: ignoreversion
 Source: "{#Root}\engine\README.md"; DestDir: "{app}\engine"; Flags: ignoreversion
 Source: "{#Root}\NOTICE.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#Root}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Root}\docs\*.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 
 [Icons]

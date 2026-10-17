@@ -2,7 +2,8 @@
 
 Ein Paket (`tcglens-<spiel>-<indexname>-<JJJJMMTT>.zip`) enthält
 - `manifest.json`  Spiel, Indexname (Embedding-Modell), Kartenanzahl, Erstellungsdatum, Version, SHA256 der Dateien
-- `catalog.jsonl`  Katalogzeilen des Spiels (Tabelle `cards`)
+- `catalog.jsonl`  Katalogzeilen des Spiels (Tabelle `cards`) – nur wo die Datenquelle Weitergabe erlaubt
+  (`CATALOG_IN_PACK`); sonst lädt jede Installation den Katalog selbst bei der Quelle (Minuten statt Stunden)
 - `index.npz`      Embeddings des Spiels für genau dieses Modell (Schlüssel "spiel|id", float16)
 KEINE Referenzbilder (Bildrechte) – die Engine lädt Bilder nur bei Bedarf (neue Karten, Dock-Vorschau).
 
@@ -32,13 +33,16 @@ from . import paths
 from .card_database.catalog import CardRecord, Catalog
 
 PACK_FORMAT = 1
-# PLATZHALTER: Das Repository ist noch nicht veröffentlicht. Sobald es Releases gibt, hier die echte Adresse
-# eintragen (GitHub liefert Assets des neuesten Releases unter …/releases/latest/download/<datei>).
-# Solange "PLATZHALTER" in der URL steht, wird kein Netzzugriff versucht (-> lokaler Aufbau als Fallback).
-DEFAULT_PACK_URL = "https://github.com/PLATZHALTER/tcg-card-lens/releases/latest/download"
+# Datenpakete liegen als Assets am jeweils neuesten GitHub-Release (…/releases/latest/download/<datei>).
+# Steht "PLATZHALTER" in einer URL (z. B. in Tests), wird kein Netzzugriff versucht (-> lokaler Aufbau).
+DEFAULT_PACK_URL = "https://github.com/kubilaymelnikov/tcg-card-lens/releases/latest/download"
 PLACEHOLDER = "PLATZHALTER"
 INDEX_FILE = "packs.json"
 CARD_FIELDS = list(CardRecord.__dataclass_fields__)
+# Katalogdaten nur mitliefern, wo die Quelle die Weitergabe erlaubt: TCGdex (Pokémon) steht unter MIT.
+# Scryfall (Magic) bittet, Daten nicht neu zu verpacken; YGOPRODeck (Yu-Gi-Oh) untersagt die Weitergabe.
+# Deren Pakete enthalten nur die selbst berechneten Embeddings; der Katalog kommt direkt von der Quelle.
+CATALOG_IN_PACK = {"pokemon": True}
 
 
 class PackError(Exception):
@@ -73,7 +77,7 @@ def sha256_file(path: str) -> str:
 
 # ---------------------------------------------------------------- bauen
 def build_pack(game: str, index_name: str, out_dir: str, catalog: Catalog | None = None,
-               index_dir: str | None = None, version: str | None = None) -> dict:
+               index_dir: str | None = None, version: str | None = None, include_catalog: bool | None = None) -> dict:
     """Paket eines Spiels aus lokalem Katalog + Index bauen (liest nur). Liefert den packs.json-Eintrag."""
     from .recognition.index import read_game
 
@@ -92,6 +96,8 @@ def build_pack(game: str, index_name: str, out_dir: str, catalog: Catalog | None
 
     created = time.strftime("%Y-%m-%dT%H:%M:%S")
     version = version or time.strftime("%Y%m%d")
+    if include_catalog is None:
+        include_catalog = CATALOG_IN_PACK.get(game, False)
     catalog_bytes = "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows).encode("utf-8")
     buf = io.BytesIO()
     np.savez(buf, keys=np.array(keys, dtype=str), vectors=vectors.astype(np.float16),
@@ -103,18 +109,22 @@ def build_pack(game: str, index_name: str, out_dir: str, catalog: Catalog | None
         "format": PACK_FORMAT, "game": game, "index_name": index_name, "cards": len(rows), "vectors": len(keys),
         "dim": int(vectors.shape[1]) if len(keys) else 0, "created": created, "version": version,
         "engine": __version__,
+        "catalog": include_catalog,
         "files": {
-            "catalog.jsonl": {"sha256": hashlib.sha256(catalog_bytes).hexdigest(), "size": len(catalog_bytes)},
             "index.npz": {"sha256": hashlib.sha256(index_bytes).hexdigest(), "size": len(index_bytes)},
         },
     }
+    if include_catalog:
+        manifest["files"]["catalog.jsonl"] = {"sha256": hashlib.sha256(catalog_bytes).hexdigest(),
+                                              "size": len(catalog_bytes)}
     os.makedirs(out_dir, exist_ok=True)
     name = pack_filename(game, index_name, version)
     path = os.path.join(out_dir, name)
     tmp = path + ".tmp"
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
         z.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
-        z.writestr("catalog.jsonl", catalog_bytes)
+        if include_catalog:
+            z.writestr("catalog.jsonl", catalog_bytes)
         z.writestr("index.npz", index_bytes)
     os.replace(tmp, path)
     return {"game": game, "index_name": index_name, "file": name, "size": os.path.getsize(path),
@@ -179,7 +189,8 @@ def install_pack_file(zip_path: str, index_name: str, expected_sha256: str | Non
     if any(not k.startswith(game + "|") for k in keys):
         raise PackError("Index enthält Karten eines anderen Spiels")
     records = []
-    for line in blobs["catalog.jsonl"].decode("utf-8").splitlines():
+    # Pakete ohne Katalog (Quelle erlaubt keine Weitergabe): den Katalog baut die Wartung direkt von der Quelle
+    for line in blobs.get("catalog.jsonl", b"").decode("utf-8").splitlines():
         if line.strip():
             row = json.loads(line)
             records.append(CardRecord(**{f: row.get(f) for f in CARD_FIELDS}))
