@@ -1,5 +1,9 @@
 """Kartenidentifikation: Entzerren → Embedding-Suche (Karte/Artwork) → OCR der Fußzeile (Edition) → Entscheidung.
 
+Yu-Gi-Oh: Dasselbe Artwork steht auf vielen Drucken; das Embedding bestimmt nur den Namen, den Druck allein der
+Set-Code unter dem Artwork (OCR, deutsche „LOB-DE001“/„LOB-G001“ → Katalogcode „LOB-EN001“). Gibt es im selben Set
+mehrere Seltenheiten, bleibt der Druck unsicher (optisch nicht verlässlich unterscheidbar).
+
 Grundsatz: Ist die Edition nicht eindeutig, wird das als `certain=False` gemeldet. Für unsichere Identitäten
 zeigt das Overlay später keinen Preis an.
 """
@@ -13,13 +17,14 @@ import numpy as np
 
 from ..card_database.catalog import Catalog, CardRecord
 from ..geometry import RECT_H, RECT_W, rectify
-from .footer import FooterInfo, matches, parse_footer
+from .footer import FooterInfo, matches, parse_footer, parse_ygo_codes, ygo_asian_print, ygo_code_key, ygo_match_codes
 from .index import EmbeddingIndex
 
 if TYPE_CHECKING:
     from ..learning import LearnedStore
 
 MAX_ALTERNATIVES = 8
+MAX_CANDIDATES = 20  # so viele Drucke höchstens als Kandidaten melden (Yu-Gi-Oh-Karten haben teils > 50)
 
 
 @dataclass
@@ -165,6 +170,8 @@ class CardIdentifier:
         best = self._record(best_key)
         if best is None:
             return None
+        if best.game == "ygo":
+            return finish(self._identify_ygo(frame, corners, turns, hits, best, best_sim))
 
         other_name = next((s for k, s in hits[1:] if (r := self._record(k)) and r.name != best.name), -1.0)
         same_name = [(self._record(k), s) for k, s in hits if s >= best_sim - self.t.edition_delta]
@@ -206,3 +213,90 @@ class CardIdentifier:
             ident.candidates = [f"{r.game}|{r.id}" for r, _ in same_name]
             ident.reason = "mehrere Drucke, keine OCR"
         return finish(ident)
+
+    def _identify_ygo(self, frame: np.ndarray, corners: np.ndarray, turns: int, hits: list[tuple[str, float]],
+                      best: CardRecord, best_sim: float) -> Identity:
+        """Yu-Gi-Oh: Name über das Artwork, Druck nur über den gelesenen Set-Code.
+
+        - Set-Code passt zu genau einem Druck einer der in Frage kommenden Karten → sicher (embedding+ocr).
+          Damit wird auch ein knapper Name (zwei ähnliche Artworks) über den Set-Code entschieden.
+        - Set-Code passt zu mehreren Drucken (Seltenheiten im selben Set, alte Regionsdrucke) → Name sicher, Druck nicht.
+        - Kein Set-Code lesbar: nur eine Karte mit genau einem TCG-Druck gilt als sicher (wie bei Magic/Pokémon).
+        - Gelesener Set-Code gehört zu keinem Druck der Karte → unsicher (Name oder OCR falsch).
+        """
+        recs: dict[str, CardRecord | None] = {}
+        for k, _ in hits:
+            recs.setdefault(k, self._record(k))
+        name_sim: dict[str, float] = {}
+        for k, sim in hits:
+            r = recs[k]
+            if r is not None and r.game == "ygo" and r.name not in name_sim:
+                name_sim[r.name] = sim
+        other = max((s for n, s in name_sim.items() if n != best.name), default=-1.0)
+        name_ok = best_sim - other >= self.t.name_margin
+        ident = Identity(game="ygo", card_id=None, name=best.name, set_code=None, set_name=None, number=None,
+                         certain=False, similarity=best_sim, method="embedding")
+        # In Frage kommende Namen: bei knappem Abstand auch die ähnlichsten anderen (der Set-Code entscheidet)
+        names = [best.name] if name_ok else [n for n, s in name_sim.items()
+                                              if s >= max(self.t.min_similarity, best_sim - self.t.name_margin)][:3]
+        prints = [r for n in names for r in self.catalog.by_name("ygo", n) if r.set_code]
+
+        codes = [r.printed_number for r in prints]
+        found: set[str] = set()
+        if self.ocr is not None and prints:
+            card = rectify(frame, corners, turns=turns, margin=0.03)
+            if hasattr(self.ocr, "read_set_code"):
+                ident.footer_text = self.ocr.read_set_code(card, stop=lambda t: bool(ygo_match_codes(t, codes)))
+            else:
+                ident.footer_text = self.ocr.read_footer(card)
+            found = ygo_match_codes(ident.footer_text, codes)
+        keys = parse_ygo_codes(ident.footer_text)  # irgendein Set-Code gelesen (auch fremder)?
+        matched = [r for r in prints if ygo_code_key(r.printed_number) in found]
+
+        def take(r: CardRecord, method: str) -> Identity:
+            ident.card_id, ident.name, ident.set_code = r.id, r.name, r.set_code
+            ident.set_name, ident.number, ident.method = r.set_name, r.printed_number, method
+            ident.similarity = name_sim.get(r.name, best_sim)
+            return ident
+
+        if matched and ygo_asian_print(ident.footer_text):
+            ident.reason = "OCG-/Asien-Druck (kein TCG-Preis)"
+            ident.candidates = [f"ygo|{r.id}" for r in matched][:MAX_CANDIDATES]
+            return ident
+        if matched:
+            if len({r.name for r in matched}) > 1:
+                ident.reason = "Set-Code passt zu mehreren Karten"
+                ident.candidates = [f"ygo|{r.id}" for r in matched][:MAX_CANDIDATES]
+                return ident
+            if len(found) > 1:
+                ident.reason = "Set-Code nicht eindeutig gelesen"
+                ident.candidates = [f"ygo|{r.id}" for r in matched][:MAX_CANDIDATES]
+                return ident
+            if len(matched) == 1:
+                take(matched[0], "embedding+ocr")
+                ident.certain = ident.similarity >= self.t.min_similarity
+                return ident
+            # Gleicher Set-Code, verschiedene Seltenheiten (oder alte Regionsdrucke) → Druck unsicher
+            r = matched[0]
+            ident.name, ident.similarity = r.name, name_sim.get(r.name, best_sim)
+            ident.set_code, ident.set_name, ident.number = r.set_code, r.set_name, r.printed_number
+            ident.candidates = [f"ygo|{x.id}" for x in matched][:MAX_CANDIDATES]
+            ident.reason = f"{len(matched)} Seltenheiten mit Set-Code {r.printed_number}"
+            return ident
+        if not name_ok:
+            ident.reason = "Name nicht eindeutig"
+            ident.candidates = [k for k, _ in hits[:5]]
+            return ident
+        own = [r for r in prints if r.name == best.name]
+        ident.candidates = [f"ygo|{r.id}" for r in own][:MAX_CANDIDATES]
+        if keys:
+            ident.reason = "gelesener Set-Code passt zu keinem Druck dieser Karte"
+        elif not own:
+            ident.reason = "kein TCG-Druck bekannt"
+        elif len(own) == 1:
+            take(own[0], "embedding")
+            ident.certain = best_sim >= self.t.certain_similarity
+            ident.reason = "" if ident.certain else "geringe Ähnlichkeit"
+        else:
+            ident.reason = f"Set-Code nicht lesbar ({len(own)} Drucke)" if self.ocr is not None else "mehrere Drucke, keine OCR"
+        return ident

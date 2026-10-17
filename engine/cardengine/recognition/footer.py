@@ -1,4 +1,5 @@
-"""Sammlernummer und Set-Code aus dem OCR-Text der Kartenfußzeile lesen (Magic ab 2015, Pokémon)."""
+"""Sammlernummer und Set-Code aus dem OCR-Text der Kartenfußzeile lesen (Magic ab 2015, Pokémon) sowie den
+Yu-Gi-Oh-Set-Code („LOB-DE001“) unter dem Artwork."""
 from __future__ import annotations
 
 import re
@@ -61,3 +62,68 @@ def matches(rec, info: FooterInfo) -> int:
         if re.search(rf"0*{num}\d?0*{rec.set_total}", info.digits):
             score += 1
     return score
+
+
+# ---------------------------------------------------------------- Yu-Gi-Oh
+# Regionskennung im Set-Code: heute EN/DE/FR/IT/SP/PT/JP/KR/AE, früher E/G/F/I/S/P (Europa), ohne = Nordamerika.
+# Der Katalog (YGOPRODeck) kennt nur die englischen Codes → Vergleich über einen regionsunabhängigen Schlüssel.
+YGO_REGIONS = ("EN", "DE", "FR", "IT", "SP", "PT", "JP", "JA", "KR", "AE", "E", "G", "F", "I", "S", "P", "J", "K", "A")
+_YGO_CODE = re.compile(rf"^([A-Z0-9]{{2,5}})-(?:{'|'.join(YGO_REGIONS)})?([A-Z]{{0,3}}\d{{1,4}}[A-Z]?|TKN)$")
+_YGO_IN_TEXT = re.compile(r"(?<![A-Z0-9])([A-Z0-9]{2,5}) ?[-‐‑–—_~.] ?([A-Z]{0,4}[0-9OIL]{2,4}[A-Z]?)(?![A-Z0-9])")
+
+
+def ygo_code_key(code: str) -> str | None:
+    """Sprach-/regionsunabhängiger Schlüssel: "LOB-DE001", "LOB-G001", "LOB-EN001", "LOB-001" → "LOB-001".
+    O/0 und I/1 werden im Präfix gleich behandelt (OCR verwechselt sie, Präfixe enthalten beides)."""
+    m = _YGO_CODE.match(code.strip().upper())
+    if not m:
+        return None
+    prefix, num = m.groups()
+    return f"{prefix.replace('O', '0').replace('I', '1')}-{num}"
+
+
+def parse_ygo_codes(text: str) -> list[str]:
+    """Alle plausiblen Set-Codes im OCR-Text als Schlüssel (siehe `ygo_code_key`), Reihenfolge wie gelesen."""
+    out: list[str] = []
+    for prefix, rest in _YGO_IN_TEXT.findall(text.upper()):
+        # In der Nummer liest die OCR Ziffern gern als Buchstaben ("DEOO1", "ENI23")
+        m = re.match(r"^([A-Z]*?)([0-9OIL]+)([A-Z]?)$", rest)
+        if m:
+            digits = m.group(2).replace("O", "0").replace("I", "1").replace("L", "1")
+            rest = m.group(1) + digits + m.group(3)
+        key = ygo_code_key(f"{prefix}-{rest}")
+        if key and key not in out:
+            out.append(key)
+    return out
+
+
+# OCR-Verwechslungen bei der kleinen Set-Code-Schrift; auf Text und Katalogcode gleich angewendet
+_CONFUSABLE = str.maketrans({"O": "0", "Q": "0", "D": "0", "I": "1", "L": "1", "J": "1", "B": "8", "Z": "2",
+                             "S": "5", "G": "6"})
+
+
+def _canon(s: str) -> str:
+    return re.sub(r"[^A-Z0-9]", "", s.upper()).translate(_CONFUSABLE)
+
+
+def ygo_match_codes(text: str, codes: list[str]) -> set[str]:
+    """Welche der Katalogcodes (`codes`, z. B. "LCYW-EN078") stehen im OCR-Text? Liefert ihre Schlüssel
+    (`ygo_code_key`). Tolerant gegenüber Region (EN/DE/G …), fehlendem Bindestrich und typischen Verwechslungen –
+    vertretbar, weil nur die wenigen Drucke der bereits erkannten Karte verglichen werden."""
+    lines = [_canon(line) for line in text.splitlines() if line.strip()]
+    out: set[str] = set()
+    for code in codes:
+        key = ygo_code_key(code)
+        if not key or "-" not in code:
+            continue
+        prefix = code.split("-", 1)[0]
+        num = key.split("-", 1)[1]
+        pat = re.compile(re.escape(_canon(prefix)) + r"[A-Z0-9]{0,2}" + re.escape(_canon(num)) + r"(?![0-9])")
+        if any(pat.search(line) for line in lines):
+            out.add(key)
+    return out
+
+
+def ygo_asian_print(text: str) -> bool:
+    """Set-Code einer OCG-/Asien-Ausgabe ("-JP001", "-KR001", "-AE001")? Deren Preise sind nicht die des TCG-Drucks."""
+    return bool(re.search(r"[A-Z0-9]{2,5} ?[-‐‑–—_~.] ?(JP|JA|KR|AE)[0-9OIL]{2,4}", text.upper()))

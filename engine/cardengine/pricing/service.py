@@ -3,6 +3,7 @@
 Zuordnung Karte → Cardmarket-Produkt (idProduct):
 - Magic: `cardmarket_id` aus den Scryfall-Daten (bereits im Katalog)
 - Pokémon: einmalig je Karte aus den TCGdex-Kartendetails (`pricing.cardmarket.idProduct`), danach im Katalog gecacht
+- Yu-Gi-Oh: `cardmarket_id` aus dem Katalogaufbau (Cardmarket-Produktliste, nur eindeutige Zuordnungen)
 """
 from __future__ import annotations
 

@@ -24,6 +24,7 @@ import numpy as np
 
 from cardengine import __version__
 from cardengine.card_database.names import CardNames
+from cardengine.games import parse_games
 from cardengine.overlay import OverlayRenderer
 from cardengine.pipeline import CardPipeline, Locked
 from cardengine.snapshots import SnapshotStore
@@ -35,7 +36,7 @@ HEADER = 64
 
 DEFAULT_SETTINGS = {
     "enabled": True,
-    "games": "both",  # both | pokemon | mtg
+    "games": "both",  # both (= Pokémon + Magic) | all | pokemon | mtg | ygo | Liste/Kommaliste, z. B. "pokemon,ygo"
     "mode": "facecam",  # facecam | table
     "sensitivity": 0.4,  # Detektor-Schwelle 0..1
     "hold_time": 1.2,  # s
@@ -50,6 +51,7 @@ DEFAULT_SETTINGS = {
     "thickness": 3.0,
     "color_pokemon": [255, 210, 63],
     "color_mtg": [255, 138, 61],
+    "color_ygo": [176, 110, 255],
     "debug": False,
     "auto_snapshots": True,
     "snapshot_limit_mb": 500,
@@ -228,11 +230,11 @@ class Session:
             cfg.smoothing = float(np.clip(st["smoothing"], 0, 0.9))
             self.pipeline.tracker.cfg = cfg
             self.pipeline.min_score = float(st["sensitivity"])
-            self.pipeline.game = None if st["games"] == "both" else st["games"]
+            self.pipeline.game = parse_games(st["games"])
         self.overlay = OverlayRenderer(
             scale=float(st["scale"]), show_name=bool(st["show_name"]), show_price=bool(st["show_price"]),
             show_history=bool(st["show_history"]), frame_thickness=float(st["thickness"]),
-            colors={"pokemon": tuple(st["color_pokemon"]), "mtg": tuple(st["color_mtg"])},
+            colors={"pokemon": tuple(st["color_pokemon"]), "mtg": tuple(st["color_mtg"]), "ygo": tuple(st["color_ygo"])},
             history_days=int(st["history_days"]),
         )
         self.sent_versions.clear()  # Panels mit neuen Einstellungen neu senden
@@ -247,6 +249,11 @@ class Session:
     def _localize(self, identity) -> None:
         cat = self.shared.identifier.catalog if self.shared.identifier else None
         rec = cat.get(identity.game, identity.card_id) if (cat and identity.card_id) else None
+        if rec is None and cat and identity.candidates:
+            # Druck unsicher, Name bekannt (z. B. Yu-Gi-Oh ohne lesbaren Set-Code): Name eines Kandidaten gleichen Namens
+            game, cid = identity.candidates[0].split("|", 1) if "|" in identity.candidates[0] else (identity.game, identity.candidates[0])
+            cand = cat.get(game, cid)
+            rec = cand if cand is not None and cand.name == identity.name else None
         identity.display_name = self.shared.names.name(rec, self.settings["display_language"]) if rec else identity.name
 
     def ensure_pipeline(self) -> bool:

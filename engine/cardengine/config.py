@@ -24,6 +24,7 @@ from . import paths
 GAMES: dict[str, str] = {
     "pokemon": "Pokémon",
     "mtg": "Magic: The Gathering",
+    "ygo": "Yu-Gi-Oh!",
 }
 DEFAULTS = {"games": ["pokemon", "mtg"], "languages": ["de", "en"], "pack_url": ""}
 

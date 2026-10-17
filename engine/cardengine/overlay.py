@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from .tracking import Track
 
-GAME_COLORS = {"mtg": (255, 138, 61), "pokemon": (255, 210, 63)}  # RGB
+GAME_COLORS = {"mtg": (255, 138, 61), "pokemon": (255, 210, 63), "ygo": (176, 110, 255)}  # RGB
 UNCERTAIN = (251, 191, 36)
 PENDING = (125, 211, 252)
 UP, DOWN = (74, 222, 128), (248, 113, 113)

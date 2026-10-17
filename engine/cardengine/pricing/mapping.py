@@ -1,6 +1,8 @@
 """Zuordnung Karte → Cardmarket-Produkt (idProduct) mit dauerhaftem Cache und Vorab-Laden im Hintergrund.
 
 - Magic: steht bereits im Katalog (Scryfall `cardmarket_id`) – kein Netzwerkzugriff.
+- Yu-Gi-Oh: wird beim Katalogaufbau aus der Cardmarket-Produktliste bestimmt (`card_database/ygo.py`, nur eindeutige
+  Zuordnungen) und steht ebenfalls als `cardmarket_id` im Katalog; ohne Eintrag gibt es keinen Preis.
 - Pokémon: TCGdex-Kartendetails (`pricing.cardmarket.idProduct`, Varianten). Ergebnis wird mit Zeitstempel in
   `cardmarket_map` gespeichert (auch „kein Produkt“), erneute Prüfung erst nach `MAX_AGE`.
 - Ein Hintergrund-Thread lädt alle fehlenden Zuordnungen vorab. Karten, die gerade im Kamerabild sind, werden mit

@@ -124,6 +124,7 @@ class EmbeddingIndex:
         self.keys = keys  # "game|id"
         self.vectors = vectors.astype(np.float16)
         self._key_pos = {k: i for i, k in enumerate(keys)}
+        self._masks: dict[tuple[str, ...], np.ndarray] = {}  # Spielauswahl → Maske (einmal berechnet)
 
     @classmethod
     def load(cls, name: str, games: list[str] | tuple[str, ...] | None = None, index_dir: str | None = None,
@@ -173,10 +174,15 @@ class EmbeddingIndex:
         for game, (keys, vectors) in _split_by_game(self.keys, self.vectors).items():
             _write_npz(index_path(name, game, index_dir), keys, vectors, name, game)
 
-    def search(self, query: np.ndarray, k: int = 10, game: str | None = None) -> list[tuple[str, float]]:
+    def search(self, query: np.ndarray, k: int = 10, game: str | tuple[str, ...] | None = None) -> list[tuple[str, float]]:
+        """`game`: ein Spiel ("pokemon") oder mehrere (Tupel), None = alle."""
         sims = self.vectors @ query.astype(np.float16)
         if game:
-            mask = np.array([key.startswith(game + "|") for key in self.keys])
+            games = (game,) if isinstance(game, str) else tuple(game)
+            mask = self._masks.get(games)
+            if mask is None:
+                prefixes = tuple(g + "|" for g in games)
+                mask = self._masks[games] = np.array([key.startswith(prefixes) for key in self.keys], bool)
             sims = np.where(mask, sims, -1)
         top = np.argpartition(-sims, min(k, len(sims) - 1))[:k]
         top = top[np.argsort(-sims[top])]
@@ -203,8 +209,14 @@ def build_index(embedder, games: list[str] | tuple[str, ...] | None = None, batc
     for game in games:
         old = read_game(name, game, index_dir, legacy_ok=False)
         keys, vecs, todo = [], [], []
-        for rec in cat.all(game):
+        # Teilen sich mehrere Einträge eine Bilddatei (Yu-Gi-Oh: ein Artwork, viele Drucke), wird sie nur einmal
+        # eingebettet – sonst bestünden die Top-k nur aus Kopien desselben Artworks. Sortiert = stabile Auswahl.
+        seen_images: set[str] = set()
+        for rec in sorted(cat.all(game), key=lambda r: r.id):
             key = f"{rec.game}|{rec.id}"
+            if rec.image_path in seen_images:
+                continue
+            seen_images.add(rec.image_path)
             i = old._key_pos.get(key) if old else None
             if i is not None:
                 keys.append(key)

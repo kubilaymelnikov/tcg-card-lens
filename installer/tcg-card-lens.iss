@@ -4,7 +4,7 @@
 #define Root ".."
 ; Auswahlseite: Spiele und Namenssprachen als "kürzel=Anzeigename;…" (neue Spiele hier ergänzen,
 ; Kürzel wie in engine/cardengine/config.py GAMES). Vorauswahl: alle Spiele, Sprachen laut LangDefault.
-#define GameList "pokemon=Pokémon;mtg=Magic: The Gathering"
+#define GameList "pokemon=Pokémon;mtg=Magic: The Gathering;ygo=Yu-Gi-Oh!"
 #define LangList "de=Deutsch;en=Englisch;fr=Französisch;it=Italienisch;es=Spanisch;pt=Portugiesisch;ja=Japanisch"
 #define LangDefault ",de,en,"
 

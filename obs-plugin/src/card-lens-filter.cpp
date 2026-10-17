@@ -24,6 +24,9 @@ const char *kLanguages[][2] = {{"de", "Deutsch"},      {"en", "Englisch"},      
 			       {"it", "Italienisch"},  {"es", "Spanisch"},      {"pt", "Portugiesisch"},
 			       {"ja", "Japanisch"}};
 
+// Kartenspiele: je eine Checkbox (Einstellung "game_<kürzel>"), an die Engine als Kommaliste "pokemon,mtg,ygo"
+const char *kGames[][2] = {{"pokemon", "Pokémon"}, {"mtg", "Magic: The Gathering"}, {"ygo", "Yu-Gi-Oh!"}};
+
 struct Filter {
 	obs_source_t *source = nullptr;
 	std::unique_ptr<EngineClient> client;
@@ -54,6 +57,28 @@ json rgb_json(uint32_t abgr)
 	return json::array({int(abgr & 0xFF), int((abgr >> 8) & 0xFF), int((abgr >> 16) & 0xFF)});
 }
 
+// Ältere Einstellungen (Auswahlliste "games": both | pokemon | mtg) einmalig in die Checkboxen übernehmen
+void migrate_games(obs_data_t *s)
+{
+	if (!obs_data_has_user_value(s, "games"))
+		return;
+	std::string old = obs_data_get_string(s, "games");
+	if (old == "pokemon" || old == "mtg") {
+		obs_data_set_bool(s, "game_pokemon", old == "pokemon");
+		obs_data_set_bool(s, "game_mtg", old == "mtg");
+	}
+	obs_data_erase(s, "games");
+}
+
+std::string games_setting(obs_data_t *s)
+{
+	std::string out;
+	for (auto &g : kGames)
+		if (obs_data_get_bool(s, (std::string("game_") + g[0]).c_str()))
+			out += (out.empty() ? "" : ",") + std::string(g[0]);
+	return out.empty() ? "both" : out; // nichts gewählt → wie bisher Pokémon + Magic
+}
+
 std::string settings_to_json(obs_data_t *s)
 {
 	json langs = json::array();
@@ -64,7 +89,7 @@ std::string settings_to_json(obs_data_t *s)
 		langs.push_back("en");
 	json j = {
 		{"enabled", obs_data_get_bool(s, "enabled")},
-		{"games", obs_data_get_string(s, "games")},
+		{"games", games_setting(s)},
 		{"mode", obs_data_get_string(s, "mode")},
 		{"sensitivity", obs_data_get_double(s, "sensitivity")},
 		{"hold_time", obs_data_get_double(s, "hold_time")},
@@ -79,6 +104,7 @@ std::string settings_to_json(obs_data_t *s)
 		{"thickness", obs_data_get_double(s, "thickness")},
 		{"color_pokemon", rgb_json(color_from_settings(s, "color_pokemon"))},
 		{"color_mtg", rgb_json(color_from_settings(s, "color_mtg"))},
+		{"color_ygo", rgb_json(color_from_settings(s, "color_ygo"))},
 		{"debug", obs_data_get_bool(s, "debug")},
 		{"auto_snapshots", obs_data_get_bool(s, "auto_snapshots")},
 		{"snapshot_limit_mb", obs_data_get_int(s, "snapshot_limit_mb")},
@@ -105,6 +131,7 @@ const char *filter_name(void *)
 void filter_update(void *data, obs_data_t *s)
 {
 	auto *f = static_cast<Filter *>(data);
+	migrate_games(s);
 	f->enabled = obs_data_get_bool(s, "enabled");
 	f->analysis_fps = obs_data_get_double(s, "analysis_fps");
 	f->style.debug = obs_data_get_bool(s, "debug");
@@ -145,7 +172,9 @@ void filter_destroy(void *data)
 void filter_defaults(obs_data_t *s)
 {
 	obs_data_set_default_bool(s, "enabled", true);
-	obs_data_set_default_string(s, "games", "both");
+	obs_data_set_default_bool(s, "game_pokemon", true);
+	obs_data_set_default_bool(s, "game_mtg", true);
+	obs_data_set_default_bool(s, "game_ygo", false); // Yu-Gi-Oh-Daten werden erst auf Wunsch aufgebaut
 	obs_data_set_default_string(s, "mode", "facecam");
 	obs_data_set_default_double(s, "sensitivity", 0.4);
 	obs_data_set_default_double(s, "hold_time", 1.2);
@@ -163,6 +192,7 @@ void filter_defaults(obs_data_t *s)
 	obs_data_set_default_double(s, "thickness", 3.0);
 	obs_data_set_default_int(s, "color_pokemon", 0xFF3FD2FF); // 0xAABBGGRR → RGB(255,210,63)
 	obs_data_set_default_int(s, "color_mtg", 0xFF3D8AFF);     // RGB(255,138,61)
+	obs_data_set_default_int(s, "color_ygo", 0xFFFF6EB0);     // RGB(176,110,255)
 	obs_data_set_default_bool(s, "debug", false);
 	obs_data_set_default_bool(s, "auto_snapshots", true);
 	obs_data_set_default_int(s, "snapshot_limit_mb", 500);
@@ -199,11 +229,9 @@ obs_properties_t *filter_properties(void *data)
 	// Allgemein
 	obs_properties_t *g = obs_properties_create();
 	obs_properties_add_bool(g, "enabled", obs_module_text("Enabled"));
-	obs_property_t *games = obs_properties_add_list(g, "games", obs_module_text("Games"), OBS_COMBO_TYPE_LIST,
-							OBS_COMBO_FORMAT_STRING);
-	obs_property_list_add_string(games, obs_module_text("Games.Both"), "both");
-	obs_property_list_add_string(games, "Pokémon", "pokemon");
-	obs_property_list_add_string(games, "Magic: The Gathering", "mtg");
+	obs_properties_add_text(g, "games_label", obs_module_text("Games"), OBS_TEXT_INFO);
+	for (auto &game : kGames)
+		obs_properties_add_bool(g, (std::string("game_") + game[0]).c_str(), game[1]);
 	obs_property_t *mode = obs_properties_add_list(g, "mode", obs_module_text("Mode"), OBS_COMBO_TYPE_LIST,
 						       OBS_COMBO_FORMAT_STRING);
 	obs_property_list_add_string(mode, obs_module_text("Mode.Facecam"), "facecam");
@@ -239,6 +267,7 @@ obs_properties_t *filter_properties(void *data)
 	obs_properties_add_float_slider(o, "thickness", obs_module_text("Thickness"), 1.0, 12.0, 0.5);
 	obs_properties_add_color(o, "color_pokemon", obs_module_text("ColorPokemon"));
 	obs_properties_add_color(o, "color_mtg", obs_module_text("ColorMtg"));
+	obs_properties_add_color(o, "color_ygo", obs_module_text("ColorYgo"));
 	obs_properties_add_group(props, "grp_overlay", obs_module_text("Group.Overlay"), OBS_GROUP_NORMAL, o);
 
 	// Debug

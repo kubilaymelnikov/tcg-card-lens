@@ -25,13 +25,14 @@ from cardengine.recognition.embedder import Embedder  # noqa: E402
 from cardengine.recognition.index import EmbeddingIndex, available_games, build_index, migrate_legacy  # noqa: E402
 
 
-def camera_view(card: np.ndarray, rng: random.Random, card_px: int) -> tuple[np.ndarray, np.ndarray]:
-    """Karte in eine 1280×720-Szene setzen; liefert Szene und (leicht verrauschte) Ecken wie vom Detektor."""
+def camera_view(card: np.ndarray, rng: random.Random, card_px: int, ratio: float = 63 / 88) -> tuple[np.ndarray, np.ndarray]:
+    """Karte in eine 1280×720-Szene setzen; liefert Szene und (leicht verrauschte) Ecken wie vom Detektor.
+    `ratio` = Breite/Höhe der Karte (Yu-Gi-Oh: 59/86)."""
     W, H = 1280, 720
     bg = np.full((H, W, 3), [rng.randint(20, 200) for _ in range(3)], np.uint8)
     bg = np.clip(bg + np.random.normal(0, 8, bg.shape), 0, 255).astype(np.uint8)
     ch = card_px
-    cw = ch * 63 / 88
+    cw = ch * ratio
     cx, cy = W / 2 + rng.uniform(-200, 200), H / 2 + rng.uniform(-100, 100)
     a = rng.uniform(-0.6, 0.6)
     pts = np.float32([[-cw / 2, -ch / 2], [cw / 2, -ch / 2], [cw / 2, ch / 2], [-cw / 2, ch / 2]])

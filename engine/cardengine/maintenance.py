@@ -31,12 +31,19 @@ WEEK = 7 * 86400
 IMAGE_CHUNK = 1500  # Bilder je Durchgang, danach Index-Update
 
 # Katalog-Aufbau je Spiel (neue Spiele hier ergänzen): Funktion(catalog) -> Liste der Karten
+def _build_ygo(cat):
+    from .card_database.ygo import build_ygo
+
+    return build_ygo(cat)
+
+
 CATALOG_BUILDERS = {
     "pokemon": lambda cat: build_pokemon(cat, None),
     "mtg": lambda cat: build_mtg(cat, sets=[], all_images=False),
+    "ygo": _build_ygo,  # YGOPRODeck + Cardmarket-Zuordnung (docs/YUGIOH.md)
 }
 # Spiele mit sehr großem Katalog: Bilder nicht im Setup, sondern schrittweise im Hintergrund
-BACKGROUND_IMAGE_GAMES = {"mtg"}
+BACKGROUND_IMAGE_GAMES = {"mtg", "ygo"}
 
 
 def _age(path: str) -> float:

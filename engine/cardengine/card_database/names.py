@@ -4,6 +4,8 @@
   (z. B. „sv03.5-151“). Die Listen der gewählten Sprachen werden vorab geladen und 7 Tage zwischengespeichert.
 - Magic: Scryfall `/cards/{set}/{nummer}/{sprache}` → `printed_name`, nur für erkannte Karten, dauerhaft gecacht
   (auch „gibt es nicht in dieser Sprache“). Der Komplett-Download aller Sprachen (~2 GB) wird so vermieden.
+- Yu-Gi-Oh: YGOPRODeck `cardinfo.php?language=xx` (nur de/fr/it/pt) liefert alle Karten mit Namen je Passcode
+  (~19 MB je Sprache, 7 Tage zwischengespeichert). Wird nur geladen, wenn der Yu-Gi-Oh-Katalog aufgebaut ist.
 Fallback ist immer der englische Name.
 """
 from __future__ import annotations
@@ -28,6 +30,7 @@ LANGUAGES = {  # Code -> (Anzeigename, TCGdex-Code, Scryfall-Code)
     "pt": ("Portugiesisch", "pt", "pt"),
     "ja": ("Japanisch", "ja", "ja"),
 }
+YGO_LANGUAGES = {"de", "fr", "it", "pt"}  # von YGOPRODeck angebotene Übersetzungen
 DIR = os.path.join(DATA_DIR, "names")
 MAX_AGE = 7 * 86400
 
@@ -36,6 +39,7 @@ class CardNames:
     def __init__(self):
         os.makedirs(DIR, exist_ok=True)
         self._pokemon: dict[str, dict[str, str]] = {}
+        self._ygo: dict[str, dict[str, str]] = {}  # Sprache -> Passcode -> Name
         self._lock = threading.Lock()
         self._db = sqlite3.connect(os.path.join(DIR, "mtg_names.sqlite"), timeout=30, check_same_thread=False)
         self._db.execute("CREATE TABLE IF NOT EXISTS names (id TEXT, lang TEXT, name TEXT, PRIMARY KEY (id, lang))")
@@ -65,6 +69,27 @@ class CardNames:
                 print(f"[namen] Pokémon {LANGUAGES[lang][0]}: {len(names)} Namen")
             except (requests.RequestException, ValueError, OSError) as err:
                 print(f"[namen] Pokémon {lang}: {err}")
+        if os.path.isdir(os.path.join(DATA_DIR, "ygo")):
+            for lang in languages:
+                if lang in YGO_LANGUAGES and lang not in self._ygo:
+                    self._preload_ygo(lang)
+
+    def _preload_ygo(self, lang: str) -> None:
+        path = os.path.join(DIR, f"ygo-{lang}.json")
+        try:
+            if not os.path.exists(path) or time.time() - os.path.getmtime(path) > MAX_AGE:
+                r = self._session.get(f"https://db.ygoprodeck.com/api/v7/cardinfo.php?language={lang}", timeout=180)
+                r.raise_for_status()
+                data = {str(c["id"]): c["name"] for c in r.json().get("data", [])}
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False)
+            with open(path, encoding="utf-8") as f:
+                names = json.load(f)
+            with self._lock:
+                self._ygo[lang] = names
+            print(f"[namen] Yu-Gi-Oh {LANGUAGES[lang][0]}: {len(names)} Namen")
+        except (requests.RequestException, ValueError, OSError) as err:
+            print(f"[namen] Yu-Gi-Oh {lang}: {err}")
 
     def name(self, rec: CardRecord, lang: str) -> str:
         """Name der Karte in `lang`, sonst der englische Katalogname."""
@@ -72,6 +97,8 @@ class CardNames:
             return rec.name
         if rec.game == "pokemon":
             return self._pokemon.get(lang, {}).get(rec.id) or rec.name
+        if rec.game == "ygo":
+            return self._ygo.get(lang, {}).get(rec.id.split("-", 1)[0]) or rec.name  # Schlüssel: Passcode
         return self._mtg_name(rec, lang) or rec.name
 
     def find_ids(self, query: str, limit: int = 500) -> list[tuple[str, str]]:
@@ -91,7 +118,7 @@ class CardNames:
     def name_nowait(self, rec: CardRecord, lang: str) -> str:
         """Wie `name()`, aber nie mit Netzwerkzugriff (für das Dock): fehlende Magic-Namen werden im Hintergrund
         nachgeladen, bis dahin gilt der englische Name."""
-        if lang == "en" or lang not in LANGUAGES or rec.game == "pokemon":
+        if lang == "en" or lang not in LANGUAGES or rec.game in ("pokemon", "ygo"):
             return self.name(rec, lang)
         row = self._cached(rec.id, lang)
         if row is not None:
