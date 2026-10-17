@@ -74,6 +74,20 @@ class CardNames:
             return self._pokemon.get(lang, {}).get(rec.id) or rec.name
         return self._mtg_name(rec, lang) or rec.name
 
+    def find_ids(self, query: str, limit: int = 500) -> list[tuple[str, str]]:
+        """(Spiel, Karten-ID) aller Karten, deren Name in einer geladenen Sprache `query` enthält (für die Suche).
+        Magic: nur bereits nachgeschlagene Namen (lokaler Cache), Pokémon: alle geladenen Namenslisten."""
+        q = query.casefold()
+        out: list[tuple[str, str]] = []
+        for names in list(self._pokemon.values()):
+            out += [("pokemon", cid) for cid, n in names.items() if q in n.casefold()]
+            if len(out) >= limit:
+                return out[:limit]
+        with self._lock:
+            rows = self._db.execute("SELECT id FROM names WHERE name LIKE ? LIMIT ?", (f"%{query}%", limit)).fetchall()
+        out += [("mtg", r[0]) for r in rows]
+        return out[:limit]
+
     def name_nowait(self, rec: CardRecord, lang: str) -> str:
         """Wie `name()`, aber nie mit Netzwerkzugriff (für das Dock): fehlende Magic-Namen werden im Hintergrund
         nachgeladen, bis dahin gilt der englische Name."""
