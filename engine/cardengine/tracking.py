@@ -26,6 +26,11 @@ class TrackerConfig:
     lost_after_s: float = 1.2  # so lange ohne Bestätigung sichtbar bleiben
     detection_weight: float = 0.6  # wie stark eine neue Detektion die geschätzten Ecken korrigiert
     smoothing: float = 0.5  # Glättung der angezeigten Ecken (0 = keine)
+    # Positions-Lock: Ruht der Kartenbereich, wird die Position eingefroren und nur noch feinjustiert
+    motion_still: float = 1.5  # mittlere Bildänderung (Graustufen, verkleinertes Bild), darunter gilt "ruhig"
+    lock_after_frames: int = 8  # so viele ruhige Frames in Folge -> Lock
+    lock_tolerance: float = 0.06  # Detektionen mit < 6 % Abweichung (Kartenbreite) bestätigen den Lock
+    refine_samples: int = 20  # so viele bestätigende Detektionen werden gemittelt, dann steht die Position
 
     @classmethod
     def facecam(cls) -> "TrackerConfig":
@@ -37,6 +42,7 @@ class TrackerConfig:
 
 
 _ids = itertools.count(1)
+LOCK_GLIDE = 0.15  # Anteil, um den sich die Anzeige je Frame der fixierten Position nähert
 
 
 @dataclass
@@ -56,6 +62,15 @@ class Track:
     attempts: int = 0
     next_attempt: float = 0.0
     signature: np.ndarray | None = None  # kleines Graubild der Karte zur Änderungserkennung (Tisch-Modus)
+    # Bewegung / Lock
+    motion: float = 0.0  # mittlere Bildänderung im Kartenbereich (letzter Frame)
+    still_frames: int = 0
+    locked: bool = False
+    finalized: bool = False  # Lock-Position fertig gemittelt
+    edge_refined: bool = False  # Ecken an die echten Kanten angepasst
+    samples: list = field(default_factory=list)
+    outliers: int = 0
+    unlocks: dict = field(default_factory=dict)  # Grund -> Anzahl (Diagnose)
 
     @property
     def stable(self) -> bool:
@@ -67,21 +82,73 @@ class CardTracker:
         self.cfg = config or TrackerConfig()
         self.tracks: list[Track] = []
         self._prev_gray: np.ndarray | None = None
+        self._prev_motion: np.ndarray | None = None
+        self.global_motion = 0.0  # mittlere Bildänderung des ganzen Bildes (für adaptive Detektionsrate)
 
     # ---------- jeder Frame ----------
     def step(self, frame: np.ndarray, now: float) -> list[Track]:
         """Ecken aller Tracks per optischem Fluss nachführen und abgelaufene Tracks entfernen."""
         s = self.cfg.flow_scale
         gray = cv2.cvtColor(cv2.resize(frame, None, fx=s, fy=s, interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY)
+        self._update_motion(gray, frame.shape[1])
         if self._prev_gray is not None and self._prev_gray.shape == gray.shape:
             for t in self.tracks:
-                self._flow(t, self._prev_gray, gray)
+                if not t.locked:  # eingefrorene Karten nicht per optischem Fluss verschieben (kein Driften)
+                    self._flow(t, self._prev_gray, gray)
         self._prev_gray = gray
         self.tracks = [t for t in self.tracks if now - t.last_confirmed <= self.cfg.lost_after_s]
         for t in self.tracks:
-            a = self.cfg.smoothing
-            t.display = (a * t.display + (1 - a) * t.corners).astype(np.float32)
+            if t.locked:
+                # Ruhende Karte: sanft auf die (fertig gemittelte, feinjustierte) Position gleiten und dort
+                # exakt stehen bleiben – keine harten Sprünge beim Mitteln oder bei der Kantenanpassung
+                delta = t.corners - t.display
+                if np.abs(delta).max() < 0.05:
+                    t.display = t.corners.copy()
+                else:
+                    t.display = (t.display + LOCK_GLIDE * delta).astype(np.float32)
+            else:
+                a = self.cfg.smoothing
+                t.display = (a * t.display + (1 - a) * t.corners).astype(np.float32)
         return self.tracks
+
+    def _update_motion(self, gray: np.ndarray, frame_w: int) -> None:
+        """Bildänderung zum Vorframe, global und je Karte; steuert Lock/Unlock.
+
+        Gemessen auf stark verkleinertem, geglättetem Bild (1/8 der Originalbreite): Sensorrauschen mittelt
+        sich weg, echte Bewegung (Karte verschoben, Hand im Bild) bleibt deutlich sichtbar.
+        """
+        small = cv2.GaussianBlur(cv2.resize(gray, None, fx=0.25, fy=0.25, interpolation=cv2.INTER_AREA), (3, 3), 0)
+        small = small.astype(np.int16)
+        prev, self._prev_motion = self._prev_motion, small
+        if prev is None or prev.shape != small.shape:
+            return
+        diff = np.abs(small - prev).astype(np.float32)
+        self.global_motion = float(diff.mean())
+        k = small.shape[1] / frame_w  # Bild- -> Bewegungskoordinaten
+        cfg = self.cfg
+        for t in self.tracks:
+            lo = np.maximum((t.corners.min(axis=0) * k).astype(int), 0)
+            hi = (t.corners.max(axis=0) * k).astype(int) + 1
+            region = diff[lo[1]:hi[1], lo[0]:hi[0]]
+            t.motion = float(region.mean()) if region.size else 0.0
+            if t.motion < cfg.motion_still:
+                t.still_frames += 1
+                if not t.locked and t.still_frames >= cfg.lock_after_frames:
+                    t.locked, t.samples, t.outliers = True, [t.corners.copy()], 0
+            else:
+                t.still_frames = 0
+                if t.locked:
+                    t.unlocks["bewegung"] = t.unlocks.get("bewegung", 0) + 1
+                    self._unlock(t)
+
+    @staticmethod
+    def _unlock(t: Track) -> None:
+        t.locked = t.finalized = t.edge_refined = False
+        t.samples, t.outliers, t.points = [], 0, None
+        if t.state == "rejected":  # an dieser Stelle hat sich etwas bewegt -> erneut prüfen
+            t.state, t.attempts, t.next_attempt = "new", 0, 0.0
+        elif t.state in ("uncertain", "failed"):  # neue Perspektive -> wieder Versuche erlauben
+            t.attempts, t.next_attempt = 0, 0.0
 
     def _flow(self, t: Track, prev: np.ndarray, cur: np.ndarray) -> None:
         s = self.cfg.flow_scale
@@ -121,18 +188,42 @@ class CardTracker:
             used_t.add(ti)
             used_d.add(di)
             t, d = self.tracks[ti], detections[di]
-            w = self.cfg.detection_weight
-            t.corners = (w * _align(d.corners, t.corners) + (1 - w) * t.corners).astype(np.float32)
+            aligned = _align(d.corners, t.corners)
             t.last_confirmed = now
             t.hits += 1
             t.score = d.score
             t.game = d.game or t.game
+            if t.locked:
+                self._confirm_locked(t, aligned)
+                continue
+            w = self.cfg.detection_weight
+            t.corners = (w * aligned + (1 - w) * t.corners).astype(np.float32)
             t.points = None  # Merkmale neu suchen (Karte kann sich verändert haben)
         for di, d in enumerate(detections):
             if di not in used_d:
                 c = d.corners.astype(np.float32)
                 self.tracks.append(Track(corners=c, display=c.copy(), score=d.score, game=d.game, first_seen=now, last_confirmed=now))
         return self.tracks
+
+
+    def _confirm_locked(self, t: Track, aligned: np.ndarray) -> None:
+        """Ruhende Karte: Detektion nur als Bestätigung; anfangs robust mitteln (Median), dann Position halten."""
+        card_w = float(np.linalg.norm(t.corners[0] - t.corners[1]))
+        dev = float(np.linalg.norm(aligned - t.corners, axis=1).max())
+        if dev > self.cfg.lock_tolerance * card_w:
+            # Deutlich andere Detektion trotz ruhigem Bild: einzelne Ausreißer ignorieren, wiederholt -> neu ausrichten
+            t.outliers += 1
+            if t.outliers >= 3:
+                t.unlocks["ausreisser"] = t.unlocks.get("ausreisser", 0) + 1
+                self._unlock(t)
+                t.corners = aligned.astype(np.float32)
+            return
+        t.outliers = 0
+        if not t.finalized:
+            t.samples.append(aligned.astype(np.float32))
+            t.corners = np.median(np.stack(t.samples), axis=0).astype(np.float32)
+            if len(t.samples) >= self.cfg.refine_samples:
+                t.finalized = True
 
 
 def _align(new: np.ndarray, ref: np.ndarray) -> np.ndarray:

@@ -142,7 +142,7 @@ class OverlayRenderer:
     def track_color(self, t: Track) -> tuple[int, int, int]:
         ident = t.identity
         if ident is None:
-            return PENDING
+            return (130, 130, 140) if t.state == "rejected" else PENDING
         return self.colors.get(ident.game, PENDING) if ident.certain else UNCERTAIN
 
     def panels(self, t: Track, frame_w: int) -> list[tuple[str, int, str, np.ndarray]]:

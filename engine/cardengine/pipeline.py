@@ -22,6 +22,15 @@ class PipelineStats:
     detect_hz: float = 0.0
     identify_ms: float = 0.0
     frames: int = 0
+    detect_runs: int = 0  # tatsächliche Detektor-Durchläufe (sinkt bei ruhigem Bild)
+    locked_tracks: int = 0
+
+
+IDLE_DETECT_HZ = 1.0  # Detektionsrate, wenn das ganze Bild ruht und alle Karten fixiert sind
+SCENE_STILL = 1.0  # globale Bildänderung, darunter gilt die Szene als ruhig
+SCENE_STILL_S = 1.0  # so lange muss die Szene ruhen, bevor die Rate sinkt
+REJECT_AFTER_FAILS = 3  # so viele gescheiterte Identifikationen einer ruhenden Stelle → "keine Karte"
+ZONE_TTL_S = 15 * 60  # gemerkte "keine Karte"-Stellen verfallen nach 15 min
 
 
 SWAP_CHECK_S = 1.0
@@ -129,6 +138,9 @@ class CardPipeline:
         self.min_score = 0.0  # Erkennungsempfindlichkeit: Detektionen darunter werden verworfen
         self.events: list[tuple[str, int]] = []  # (Ereignis, Track-ID) für Debug-Snapshots; vom Aufrufer geleert
         self.on_identity = None  # optionaler Rückruf (identity) im Identifikations-Thread, z. B. Namen übersetzen
+        # Stellen, an denen nachweislich keine Karte liegt (Spielmatte, Monitor …): (Ecken, Signatur, Zeit)
+        self.rejected_zones: list[tuple[np.ndarray, np.ndarray, float]] = []
+        self._scene_still_since: float | None = None
         self.tracker = CardTracker(tracker_config)
         self.detect_interval = 1.0 / detect_hz
         self.stats = PipelineStats()
@@ -143,6 +155,7 @@ class CardPipeline:
         frame, ts = job
         t0 = time.perf_counter()
         dets = [d for d in self.detector.detect(frame) if d.score >= self.min_score]
+        self.stats.detect_runs += 1
         return dets, ts, (time.perf_counter() - t0) * 1000
 
     def _identify_job(self, job):
@@ -170,12 +183,16 @@ class CardPipeline:
         elif res is not None:
             dets, _, ms = res
             self.last_detections = dets
+            known = {t.id for t in self.tracker.tracks}
             tracks = self.tracker.update(dets, now)
+            self._apply_rejected_zones([t for t in tracks if t.id not in known], frame, now)
             self.stats.detect_ms = ms
             self._detect_times = [t for t in self._detect_times if now - t < 2.0] + [now]
             self.stats.detect_hz = (len(self._detect_times) - 1) / max(1e-6, self._detect_times[-1] - self._detect_times[0])
 
-        if now - self._last_detect >= self.detect_interval and self._det_worker.submit((frame.copy(), now)):
+        self._refine_edges(frame, tracks)
+        interval = self._current_detect_interval(now, tracks)
+        if now - self._last_detect >= interval and self._det_worker.submit((frame.copy(), now)):
             self._last_detect = now
 
         if self._id_worker:
@@ -197,6 +214,11 @@ class CardPipeline:
                         self.events.append(("fehlgeschlagen", t.id))
                         t.state = "failed"
                         t.next_attempt = now + min(5.0, 0.5 * 2 ** t.attempts)
+                        if t.attempts >= REJECT_AFTER_FAILS and t.locked:
+                            # Ruhende Stelle, mehrfach keine Karte gefunden → als Hintergrund merken, nicht weiter versuchen
+                            t.state = "rejected"
+                            self.rejected_zones.append((t.corners.copy(), _signature(frame, t.corners), now))
+                            self.events.append(("keine-karte", t.id))
                     elif identity is not None and _better(identity, old):
                         t.identity = identity
                         t.state = "identified" if identity.certain else "uncertain"
@@ -216,12 +238,61 @@ class CardPipeline:
         candidates = [
             t for t in self.tracker.tracks
             if t.stable and t.state in order and now >= t.next_attempt and t.attempts < 8
+            # Standbild bereits mehrfach geprüft: erst bei Bewegung (neue Perspektive) erneut versuchen
+            and not (t.finalized and t.attempts >= 3)
         ]
         if candidates:
             t = min(candidates, key=lambda x: (order[x.state], x.first_seen))
             if t.state == "new":
                 t.state = "identifying"
             self._id_worker.submit((t.id, frame.copy(), t.corners.copy()))
+
+    # ---------- Ruhe, Feinjustierung, Hintergrund ----------
+    def _current_detect_interval(self, now: float, tracks: list[Track]) -> float:
+        """Bewegungsabhängige Detektionsrate: ruht die ganze Szene und sind alle Karten fixiert, reicht 1×/s."""
+        if self.tracker.global_motion < SCENE_STILL:
+            if self._scene_still_since is None:
+                self._scene_still_since = now
+        else:
+            self._scene_still_since = None
+        self.stats.locked_tracks = sum(t.locked for t in tracks)
+        still = self._scene_still_since is not None and now - self._scene_still_since >= SCENE_STILL_S
+        if still and all(t.finalized or t.state == "rejected" for t in tracks):
+            return max(self.detect_interval, 1.0 / IDLE_DETECT_HZ)
+        return self.detect_interval
+
+    def _refine_edges(self, frame: np.ndarray, tracks: list[Track]) -> None:
+        """Einmalig je ruhender Karte: Ecken subpixelgenau an die echten Kanten anpassen (Perspektive)."""
+        todo = [t for t in tracks if t.finalized and not t.edge_refined]
+        if not todo:
+            return
+        import cv2
+
+        from .geometry import refine_quad_edges
+
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        for t in todo:
+            t.edge_refined = True
+            try:
+                refined = refine_quad_edges(gray, t.corners)
+            except cv2.error as err:  # Feinjustierung ist optional – nie die Erkennung stoppen
+                print(f"[tracking] Kantenanpassung übersprungen: {err}")
+                refined = None
+            if refined is not None:
+                t.corners = refined  # die Anzeige gleitet dorthin (siehe CardTracker.step)
+
+    def _apply_rejected_zones(self, new_tracks: list[Track], frame: np.ndarray, now: float) -> None:
+        """Neue Detektion an einer bekannten "keine Karte"-Stelle mit unverändertem Inhalt → gleich verwerfen."""
+        from .geometry import iou_quads
+
+        self.rejected_zones = [z for z in self.rejected_zones if now - z[2] < ZONE_TTL_S]
+        if not self.rejected_zones:
+            return
+        for t in new_tracks:
+            for corners, sig, _ in self.rejected_zones:
+                if iou_quads(t.corners, corners) > 0.6 and float(np.dot(sig, _signature(frame, t.corners))) > 0.85:
+                    t.state = "rejected"
+                    break
 
     def _check_swaps(self, frame: np.ndarray, now: float) -> None:
         """Ausgetauschte Karte an gleicher Stelle erkennen: Das Tracking folgt dem Bereich, nicht der Karte. Etwa

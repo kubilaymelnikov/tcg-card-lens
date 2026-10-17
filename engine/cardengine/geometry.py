@@ -49,6 +49,75 @@ def rectify(frame: np.ndarray, quad: np.ndarray, rotate180: bool = False, margin
     return cv2.warpPerspective(frame, m, size, flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
 
 
+def refine_quad_edges(gray: np.ndarray, quad: np.ndarray, search: float = 0.04, samples: int = 24) -> np.ndarray | None:
+    """Ecken subpixelgenau an die echten Kartenkanten anpassen (perspektivische Feinjustierung).
+
+    Für jede Seite werden entlang der Normalen die Punkte mit dem stärksten Helligkeitsgradienten gesucht
+    (±`search` × kurze Kartenseite), eine Gerade robust hineingelegt (Huber) und die Ecken als Schnittpunkte
+    benachbarter Geraden berechnet. Liefert None, wenn das Ergebnis unplausibel ist (dann alte Ecken behalten).
+    """
+    q = np.asarray(quad, np.float32)
+    short, _ = side_lengths(q)
+    r = max(3.0, short * search)
+    g = cv2.GaussianBlur(gray, (5, 5), 0).astype(np.float32)
+    gx = cv2.Sobel(g, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(g, cv2.CV_32F, 0, 1, ksize=3)
+    mag = cv2.magnitude(gx, gy)
+    h, w = gray.shape[:2]
+    lines = []
+    for i in range(4):
+        p0, p1 = q[i], q[(i + 1) % 4]
+        d = p1 - p0
+        length = float(np.linalg.norm(d))
+        if length < 10:
+            return None
+        d /= length
+        n = np.array([-d[1], d[0]], np.float32)
+        if np.dot(n, (p0 + p1) / 2 - q.mean(axis=0)) < 0:
+            n = -n  # Normale zeigt nach außen
+        # Profil von außen (+r) nach innen (-r): die äußere Kartenkante ist die *erste* deutliche Kante.
+        # Die stärkste Kante wäre oft die innere Rahmenkante (dunkler Kartenrand → helles Bildfeld).
+        offs = np.linspace(r, -r, int(2 * r) + 1).astype(np.float32)
+        pts = []
+        for t in np.linspace(0.12, 0.88, samples):
+            c = p0 + d * (t * length)
+            prof_pts = c[None, :] + offs[:, None] * n[None, :]
+            xs = np.clip(prof_pts[:, 0], 0, w - 1).astype(np.float32)
+            ys = np.clip(prof_pts[:, 1], 0, h - 1).astype(np.float32)
+            prof = cv2.remap(mag, xs.reshape(1, -1), ys.reshape(1, -1), cv2.INTER_LINEAR).ravel()
+            peak = float(prof.max())
+            if peak < 8.0:  # keine klare Kante (Finger, Glanz)
+                continue
+            k = next((j for j in range(1, len(prof) - 1)
+                      if prof[j] >= 0.25 * peak and prof[j] >= prof[j - 1] and prof[j] >= prof[j + 1]),
+                     int(np.argmax(prof)))
+            # Subpixel: Parabel durch das Maximum und seine Nachbarn
+            delta = 0.0
+            if 0 < k < len(prof) - 1:
+                a, b, cc = prof[k - 1], prof[k], prof[k + 1]
+                den = a - 2 * b + cc
+                if abs(den) > 1e-6:
+                    delta = float(np.clip(0.5 * (a - cc) / den, -0.5, 0.5))
+            pts.append(c + n * (offs[k] + delta * (offs[1] - offs[0])))
+        if len(pts) < samples // 3:
+            return None
+        vx, vy, x0, y0 = cv2.fitLine(np.array(pts, np.float32), cv2.DIST_HUBER, 0, 0.01, 0.01).ravel()
+        lines.append((np.array([x0, y0]), np.array([vx, vy])))
+    out = []
+    for i in range(4):
+        (pa, da), (pb, db) = lines[i - 1], lines[i]
+        m = np.array([[da[0], -db[0]], [da[1], -db[1]]])
+        if abs(np.linalg.det(m)) < 1e-6:
+            return None
+        s = np.linalg.solve(m, pb - pa)
+        out.append(pa + da * s[0])
+    out = np.array(out, np.float32)
+    # Ecke i ist der Schnitt von Seite i-1 und Seite i → entspricht q[i]
+    if np.linalg.norm(out - q, axis=1).max() > short * 0.05:
+        return None
+    return out
+
+
 def iou_quads(a: np.ndarray, b: np.ndarray) -> float:
     """IoU zweier konvexer Vierecke."""
     a = np.asarray(a, dtype=np.float32)

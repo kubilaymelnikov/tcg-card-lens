@@ -150,3 +150,42 @@ def test_snapshot_limit_and_rate(tmp_path):
     store.enforce_limit()
     total = sum(os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(store.dir) for f in fs)
     assert total <= 0.2 * 1024 * 1024
+
+
+def test_refine_quad_edges_pulls_corners_to_real_edges():
+    from cardengine.geometry import refine_quad_edges
+
+    truth = order_corners(QUAD)
+    gray = cv2.cvtColor(scene_with_card(QUAD), cv2.COLOR_BGR2GRAY)
+    rng = np.random.default_rng(3)
+    noisy = truth + rng.uniform(-6, 6, truth.shape).astype(np.float32)  # Detektor-Ungenauigkeit
+    refined = refine_quad_edges(gray, noisy)
+    assert refined is not None
+    err_before = np.linalg.norm(noisy - truth, axis=1).mean()
+    err_after = np.linalg.norm(refined - truth, axis=1).mean()
+    assert err_after < err_before * 0.5 and err_after < 2.5
+
+
+def test_tracker_locks_static_card_and_unlocks_on_motion():
+    tr = CardTracker(TrackerConfig.table())
+    img = scene_with_card(QUAD)
+    rng = np.random.default_rng(1)
+    t = 0.0
+    for i in range(40):  # ruhiges Bild, Detektionen mit Zittern
+        t += 1 / 30
+        tr.step(img, t)
+        if i % 3 == 0:
+            tr.update([Detection(order_corners(QUAD + rng.normal(0, 2.0, QUAD.shape).astype(np.float32)), 0.9)], t)
+    track = tr.tracks[0]
+    assert track.locked
+    shown = []
+    for i in range(30):
+        t += 1 / 30
+        tr.step(img, t)
+        if i % 3 == 0:
+            tr.update([Detection(order_corners(QUAD + rng.normal(0, 2.0, QUAD.shape).astype(np.float32)), 0.9)], t)
+        shown.append(track.display.copy())
+    assert np.stack(shown).std(axis=0).mean() < 0.3  # ruhige Anzeige trotz zitternder Detektionen
+    moved = scene_with_card(QUAD + np.float32([60, 0]))
+    tr.step(moved, t + 1 / 30)
+    assert not track.locked  # Bewegung löst den Lock
