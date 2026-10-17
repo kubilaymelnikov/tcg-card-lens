@@ -27,6 +27,7 @@ CM_GAME = {"pokemon": "Pokemon", "mtg": "Magic", "ygo": "YuGiOh"}
 CM_LANGS = {"de", "en", "fr", "it", "es"}
 CROP_SIZE = (244, 340)
 HIGHLIGHT_S = 3.0
+LIKELY_CARD_SCORE = 0.7  # Detektor-Sicherheit, ab der eine nicht erkannte Stelle im Dock trotzdem nachgefragt wird
 INSTANCE = uuid.uuid4().hex[:12]  # je Engine-Start neu: das Dock verwirft dann alte Kacheln
 ASK_GONE_S = 20.0  # gestellte Frage bleibt so lange stehen, wenn die Karte nicht mehr erkannt wird
 ASK_MIN_SHOWN_S = 2.0  # kürzer gezeigte Fragen bleiben nicht als „nicht im Bild“ stehen
@@ -166,7 +167,10 @@ class DockApi:
 
     def _card(self, sess, t) -> dict | None:
         ident = t.identity
-        if ident is None and t.state != "failed":
+        # Automatisch als „keine Karte“ abgelegt, aber der Detektor ist sich der Kartenform sicher (z. B. Druck ohne
+        # Referenzbild, starker Glanz): trotzdem fragen – nur echte Hintergrundstellen bleiben stumm
+        likely_card = t.state == "rejected" and not t.user_rejected and t.score >= LIKELY_CARD_SCORE
+        if ident is None and t.state != "failed" and not likely_card:
             return None  # noch in Erkennung oder verworfen
         lang = sess.settings.get("display_language", "de")
         label = sess.label_for(t.id)
@@ -184,6 +188,8 @@ class DockApi:
             "image": None, "crop": f"/api/crop/{sess.sid}/{t.id}?v={crop_v}",
             "cardmarket_url": None, "price": None, "candidates": [],
         }
+        if likely_card:
+            card["state"] = "failed"  # fürs Dock „nicht erkannt“ statt „verworfen“ (sonst blendet es die Kachel aus)
         if ident is None:
             return card
         key = card_key(ident.game, ident.card_id) if ident.card_id else None

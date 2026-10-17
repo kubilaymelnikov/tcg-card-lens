@@ -174,7 +174,7 @@ void filter_defaults(obs_data_t *s)
 	obs_data_set_default_bool(s, "enabled", true);
 	obs_data_set_default_bool(s, "game_pokemon", true);
 	obs_data_set_default_bool(s, "game_mtg", true);
-	obs_data_set_default_bool(s, "game_ygo", false); // Yu-Gi-Oh-Daten werden erst auf Wunsch aufgebaut
+	obs_data_set_default_bool(s, "game_ygo", true); // ohne installierte Yu-Gi-Oh-Daten sucht die Engine dort einfach nichts
 	obs_data_set_default_string(s, "mode", "facecam");
 	obs_data_set_default_double(s, "sensitivity", 0.4);
 	obs_data_set_default_double(s, "hold_time", 1.2);

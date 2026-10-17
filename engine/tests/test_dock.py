@@ -277,3 +277,15 @@ def test_duplicate_tracks_of_same_card_are_merged():
                              last_confirmed=1.0))
     tr.update([], 1.0)
     assert tr.tracks == [t]
+
+
+def test_auto_rejected_but_likely_card_is_still_asked():
+    p, t = _pipeline_with_track()
+    t.state, t.score = "rejected", 0.95  # Engine hat aufgegeben, Detektor ist sich der Kartenform sicher
+    c = _cards(_dock_with(p))[0]
+    assert c["needs_confirmation"] and c["state"] == "failed"
+    t.score = 0.3  # unsichere Form (Spielmatte o. ä.) → stumm
+    assert _cards(_dock_with(p)) == []
+    t.score, t.user_rejected = 0.95, True  # vom Nutzer verworfen → stumm
+    assert _cards(_dock_with(p)) == []
+    p.close()
