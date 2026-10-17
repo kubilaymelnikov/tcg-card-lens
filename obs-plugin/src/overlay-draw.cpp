@@ -178,40 +178,51 @@ void OverlayDrawer::draw(uint32_t w, uint32_t h, const OverlayStyle &style)
 	// Ragt die Tafel in eine fremde Karte, rutscht sie auf die eigene Karte (Preis nach oben, Name nach unten) –
 	// wie am Bildrand; weiter als bis zur gegenüberliegenden Kante der eigenen Karte aber nicht.
 	auto place = [&](float x, float y, float pw, float ph, int dir, int own_id, const Rect &own) {
+		// Kandidaten statt Hin-und-her-Schieben: gewünschte Stelle sowie direkt über/unter jedem Hindernis.
+		// Kosten: fremde Karte verdecken (sehr teuer) > andere Tafel überdecken (teuer) > Abstand zur Wunschstelle.
+		// Die eigene Karte darf verdeckt werden (Preis rutscht auf die Karte wie am Bildrand).
 		x = std::clamp(x, 0.f, std::max(0.f, float(w) - pw));
-		const float y_min = dir > 0 ? own.y0 : 0.f;               // Preis höchstens bis zur Oberkante der Karte
-		const float y_max = dir < 0 ? own.y1 - ph : float(h) - ph; // Name höchstens bis zur Unterkante
-		auto clamp_y = [&](float v) { return std::clamp(v, std::min(y_min, y_max), std::max(0.f, y_max)); };
-		y = clamp_y(std::clamp(y, 0.f, std::max(0.f, float(h) - ph)));
-		const float m = 3.f; // kleine Toleranz: Berührung zählt nicht als Überlappung
-		for (int i = 0; i < 20; i++) {
-			bool moved = false;
-			for (const auto &c : cards) {
-				if (c.first == own_id)
-					continue;
-				const Rect &r = c.second;
-				if (x < r.x1 - m && x + pw > r.x0 + m && y < r.y1 - m && y + ph > r.y0 + m) {
-					const float ny = clamp_y(dir > 0 ? r.y0 - ph - 4.f : r.y1 + 4.f);
-					if (std::abs(ny - y) > 0.5f) {
-						y = ny;
-						moved = true;
-					}
-				}
+		const float lo = dir > 0 ? std::max(0.f, own.y0) : 0.f;                       // Preis: höchstens bis Kartenoberkante
+		const float hi = std::max(0.f, dir < 0 ? std::min(own.y1 - ph, float(h) - ph) : float(h) - ph); // Name: bis Unterkante
+		const float pref = y;
+		auto overlap = [&](const Rect &r, float yy) {
+			const float ox = std::min(x + pw, r.x1) - std::max(x, r.x0);
+			const float oy = std::min(yy + ph, r.y1) - std::max(yy, r.y0);
+			return (ox > 0.f && oy > 0.f) ? ox * oy : 0.f;
+		};
+		auto cost = [&](float yy) {
+			float c = std::abs(yy - pref);
+			for (const auto &cd : cards)
+				if (cd.first != own_id)
+					c += 1000.f * overlap(cd.second, yy);
+			for (const auto &r : placed)
+				c += 50.f * overlap(r, yy);
+			return c;
+		};
+		std::vector<float> cand{pref};
+		auto add_around = [&](const Rect &r) {
+			if (x < r.x1 && x + pw > r.x0) {
+				cand.push_back(r.y0 - ph - 4.f);
+				cand.push_back(r.y1 + 4.f);
 			}
-			auto hit = std::find_if(placed.begin(), placed.end(), [&](const Rect &r) {
-				return x < r.x1 && x + pw > r.x0 && y < r.y1 && y + ph > r.y0;
-			});
-			if (hit != placed.end()) {
-				// andere Tafel im Weg: wie bisher in Leserichtung weiterschieben
-				const float ny = std::clamp(dir > 0 ? hit->y1 + 4.f : hit->y0 - ph - 4.f, 0.f, std::max(0.f, float(h) - ph));
-				if (std::abs(ny - y) > 0.5f) {
-					y = ny;
-					moved = true;
-				}
+		};
+		for (const auto &cd : cards)
+			if (cd.first != own_id)
+				add_around(cd.second);
+		for (const auto &r : placed)
+			add_around(r);
+		cand.push_back(lo);
+		cand.push_back(hi);
+		float best = std::clamp(pref, std::min(lo, hi), hi), best_cost = 1e30f;
+		for (float c : cand) {
+			c = std::clamp(c, std::min(lo, hi), hi);
+			const float k = cost(c);
+			if (k < best_cost) {
+				best = c;
+				best_cost = k;
 			}
-			if (!moved)
-				break;
 		}
+		y = best;
 		placed.push_back({x, y, x + pw, y + ph});
 		return std::pair<float, float>(x, y);
 	};
