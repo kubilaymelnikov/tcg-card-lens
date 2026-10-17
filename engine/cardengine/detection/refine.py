@@ -20,8 +20,8 @@ class RefinedDetector(Detector):
         # Im Ausschnitt ist die Karte groß → Mindestfläche relativ zum Ausschnitt anheben
         self.local = ClassicalDetector(max_side=640, min_area_frac=0.25, ratio_tol=0.18)
 
-    def detect(self, frame: np.ndarray) -> list[Detection]:
-        dets = self.base.detect(frame)
+    def detect(self, frame: np.ndarray, conf: float | None = None) -> list[Detection]:
+        dets = self.base.detect(frame) if conf is None else self.base.detect(frame, conf=conf)
         h, w = frame.shape[:2]
         for d in dets:
             q = d.corners

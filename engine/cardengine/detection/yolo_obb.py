@@ -25,8 +25,10 @@ class YoloObbDetector(Detector):
         self.device = device
         self.half = half and str(weights).endswith(".pt")
 
-    def detect(self, frame: np.ndarray) -> list[Detection]:
-        res = self.model.predict(frame, imgsz=self.imgsz, conf=self.conf, device=self.device, verbose=False)[0]
+    def detect(self, frame: np.ndarray, conf: float | None = None) -> list[Detection]:
+        """`conf` überschreibt die Schwelle für diesen Aufruf (gezielte Suche im Dock)."""
+        res = self.model.predict(frame, imgsz=self.imgsz, conf=self.conf if conf is None else conf,
+                                 device=self.device, verbose=False)[0]
         if res.obb is None or len(res.obb) == 0:
             return []
         corners = res.obb.xyxyxyxy.cpu().numpy()  # (N, 4, 2)

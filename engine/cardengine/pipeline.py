@@ -404,6 +404,68 @@ class CardPipeline:
             self.events.append(("gedreht", t.id))
         self.post(run)
 
+    def probe(self, point: tuple[float, float] | None = None, rect: tuple[float, float, float, float] | None = None,
+              timeout: float = 4.0) -> dict:
+        """Gezielt an einer Stelle nach einer Karte suchen (Pixelkoordinaten; Dock-Vorschau). Wartet auf das
+        Ergebnis: {"found", "track", "how"}. Gefundene Karten werden wie normale Tracks verfolgt und identifiziert."""
+        import threading as _t
+
+        from .geometry import iou_quads, side_lengths
+        from .probe import probe_point, probe_rect
+
+        done, result = _t.Event(), {"found": False}
+
+        def run(frame, now):
+            try:
+                tracks = [t for t in self.tracker.tracks if not t.hidden]
+                heights = [side_lengths(t.corners)[1] for t in tracks]
+                card_h = float(np.median(heights)) if heights else None
+                if rect is not None:
+                    quad, how = probe_rect(self.detector, frame, *rect)
+                else:
+                    # Liegt an der Stelle schon eine Karte, wird sie neu erkannt statt doppelt angelegt
+                    import cv2
+
+                    hit = next((t for t in tracks if cv2.pointPolygonTest(
+                        t.corners.reshape(-1, 1, 2).astype(np.float32), (float(point[0]), float(point[1])), False) >= 0),
+                        None)
+                    if hit is not None:
+                        self._reset_for_probe(hit)
+                        result.update(found=True, track=hit.id, how="vorhanden")
+                        return
+                    quad, how = probe_point(self.detector, frame, point[0], point[1], card_h)
+                if quad is None:
+                    return
+                quad = np.asarray(quad, np.float32)
+                same = max(tracks, key=lambda t: iou_quads(t.corners, quad), default=None)
+                if same is not None and iou_quads(same.corners, quad) >= 0.5:
+                    same.corners = quad.copy()
+                    self._reset_for_probe(same)
+                    result.update(found=True, track=same.id, how="vorhanden")
+                    return
+                t = Track(corners=quad.copy(), display=quad.copy(), score=1.0, game=None, first_seen=now,
+                          last_confirmed=now, hits=3)
+                self.tracker.tracks.append(t)
+                # Gemerkte „keine Karte“-Stelle hier aufheben – der Nutzer sagt ausdrücklich: hier liegt eine
+                self.rejected_zones = [z for z in self.rejected_zones if iou_quads(z[0], quad) < 0.5]
+                self.events.append(("gezielt", t.id))
+                result.update(found=True, track=t.id, how=how)
+            finally:
+                done.set()
+
+        self.post(run)
+        if not done.wait(timeout):
+            return {"found": False, "error": "Zeitüberschreitung – läuft das Kamerabild?"}
+        return result
+
+    def _reset_for_probe(self, t: Track) -> None:
+        """Vorhandene Karte an der Klickstelle: neu erkennen (auch wenn sie als „keine Karte“ abgelegt war)."""
+        t.identity, t.signature, t.state, t.confirmed = None, None, "new", False
+        t.user_rejected = t.hidden = False
+        t.attempts, t.next_attempt = 0, 0.0
+        t.score = max(t.score, 1.0)
+        t.last_confirmed = self.tracker._now
+
     def refresh(self, track_id: int) -> None:
         """Karte neu erkennen (und damit den Preis neu laden)."""
         def run(frame, now):

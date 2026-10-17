@@ -110,13 +110,59 @@ class DockApi:
                 continue
             cards = self._sticky_cards(sess)
             cards.sort(key=lambda c: (len(c["label"]), c["label"]))
-            sessions.append({"id": sess.sid, "source": sess.source, "highlight": sess.current_highlight(), "cards": cards})
+            entry = {"id": sess.sid, "source": sess.source, "highlight": sess.current_highlight(), "cards": cards}
+            entry.update(self._preview(sess))
+            sessions.append(entry)
         try:
             rev = str(int(os.path.getmtime(DOCK_HTML)))
         except OSError:
             rev = None
         return {"engine": __version__, "status": self.shared.status, "learned": learned, "sessions": sessions,
                 "dock_rev": rev, "instance": INSTANCE}
+
+    def _preview(self, sess) -> dict:
+        """Kamerabild-Vorschau: Bildgröße und Umrisse aller sichtbaren Karten (normiert 0..1)."""
+        img = sess.last_frame_img
+        if img is None:
+            return {}
+        h, w = img.shape[:2]
+        tracks = []
+        for t in list(sess.pipeline.tracker.tracks):
+            if t.hidden or (t.state == "rejected" and t.user_rejected):
+                continue
+            q = (t.display / np.float32([w, h])).round(4).tolist()
+            tracks.append({"label": sess.label_for(t.id), "track": t.id, "state": t.state,
+                           "certain": bool(t.confirmed or (t.identity is not None and t.identity.certain)),
+                           "quad": q})
+        return {"frame": {"w": int(w), "h": int(h), "url": f"/api/frame/{sess.sid}"}, "tracks": tracks}
+
+    def frame_jpeg(self, sid: str, width: int = 480) -> bytes | None:
+        sess = self._session(sid)
+        if sess is None or sess.last_frame_img is None:
+            return None
+        img = sess.last_frame_img
+        width = int(np.clip(width, 80, 1280))
+        if img.shape[1] > width:
+            img = cv2.resize(img, (width, round(img.shape[0] * width / img.shape[1])), interpolation=cv2.INTER_AREA)
+        ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        return buf.tobytes() if ok else None
+
+    def probe(self, sid: str, body: dict) -> dict:
+        """Gezielte Suche an einer Stelle der Vorschau (normierte Koordinaten)."""
+        sess = self._session(sid)
+        if sess is None or sess.pipeline is None or sess.last_frame_img is None:
+            return {"ok": False, "error": "Kein Kamerabild"}
+        h, w = sess.last_frame_img.shape[:2]
+        if body.get("rect"):
+            x0, y0, x1, y1 = (float(v) for v in body["rect"])
+            res = sess.pipeline.probe(rect=(x0 * w, y0 * h, x1 * w, y1 * h))
+        else:
+            res = sess.pipeline.probe(point=(float(body["x"]) * w, float(body["y"]) * h))
+        if not res.get("found"):
+            return {"ok": True, "found": False,
+                    "error": res.get("error") or "Keine Karte gefunden – Rahmen um die Karte ziehen"}
+        return {"ok": True, "found": True, "track": res["track"], "label": sess.label_for(res["track"]),
+                "how": res.get("how")}
 
     def _sticky_cards(self, sess) -> list[dict]:
         now = time.time()
@@ -435,6 +481,10 @@ def _handler(api: DockApi):
                     qs = parse_qs(url.query)
                     return self._json(api.search(qs.get("q", [""])[0], qs.get("game", [None])[0] or None,
                                                  min(50, int(qs.get("limit", ["20"])[0]))))
+                if parts[:2] == ["api", "frame"] and len(parts) == 3:
+                    qs = parse_qs(url.query)
+                    data = api.frame_jpeg(parts[2], int(qs.get("w", ["480"])[0]))
+                    return self._send(200, data, "image/jpeg") if data else self._send(404, b"", "text/plain")
                 if parts[:2] == ["api", "crop"] and len(parts) == 4:
                     data = api.crop(parts[2], parts[3])
                     return self._send(200, data, "image/jpeg") if data else self._send(404, b"", "text/plain")
@@ -477,6 +527,8 @@ def _handler(api: DockApi):
                     return self._json(api.confirm(body["session"], body["track"], body["key"]))
                 if path == "/api/reject":
                     return self._json(api.reject(body["session"], body["track"]))
+                if path == "/api/probe":
+                    return self._json(api.probe(body["session"], body))
                 if path == "/api/rotate":
                     return self._json(api.rotate(body["session"], body["track"]))
                 if path == "/api/dismiss":

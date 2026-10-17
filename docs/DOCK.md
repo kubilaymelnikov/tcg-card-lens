@@ -124,3 +124,37 @@ Schräg gefilmt kann die lange Kartenseite kürzer wirken als die kurze – dann
 Seitenverhältnis nicht. Die Identifikation bettet deshalb alle vier Lagen ein (0°, 180°, 90°, 270°); eine 90°-Lage
 gewinnt nur mit klarem Vorsprung (`quarter_margin`). Wird so eine Querlage erkannt, dreht die Pipeline die
 Eckenzuordnung des Tracks dauerhaft mit. Liegt die Engine trotzdem falsch, dreht ↻ im Dock die Karte von Hand.
+
+## Kamerabild-Vorschau und gezielte Suche
+
+Für Karten, die der Detektor übersieht (Spiegelung in Sammelmappen, starke Schräge, Toploader): Im Dock zeigt eine
+Mini-Vorschau das aktuelle Kamerabild mit allen Karten-Umrissen. Ein Klick lässt die Engine an dieser Stelle genauer
+suchen; findet sie nichts, kann man einen Rahmen um die Karte ziehen.
+
+### `GET /api/state` (Erweiterung je Sitzung)
+
+```json
+"frame": {"w": 1920, "h": 1080, "url": "/api/frame/s1"},
+"tracks": [ {"label": "A", "track": 17, "state": "identified", "certain": true,
+             "quad": [[0.12, 0.08], [0.31, 0.09], [0.30, 0.52], [0.11, 0.51]]} ]
+```
+
+`tracks` enthält alle sichtbaren Karten (auch noch nicht erkannte), `quad` sind die vier Ecken normiert auf 0..1
+(x/Breite, y/Höhe), im Uhrzeigersinn ab oben links. Ohne Kamerabild fehlt `frame`.
+
+### `GET /api/frame/<session>?w=480`
+Aktuelles Kamerabild als JPEG, auf Breite `w` verkleinert (80–1280, Standard 480). Für die Vorschau etwa einmal pro
+Sekunde neu laden (Cache-Buster `&t=…`).
+
+### `POST /api/probe`
+Body: `{"session", "x", "y"}` (Klickpunkt, normiert 0..1) **oder** `{"session", "rect": [x0, y0, x1, y1]}`
+(aufgezogener Rahmen, normiert). Antwort nach höchstens ~3 s:
+
+```json
+{"ok": true, "found": true, "label": "H", "track": 42, "how": "detektor"}
+{"ok": true, "found": false, "error": "Keine Karte gefunden – Rahmen um die Karte ziehen"}
+```
+
+`how`: `detektor` (gezielte Suche im vergrößerten Ausschnitt), `kontur` (klassische Kantensuche), `rahmen`
+(aufgezogener Rahmen, an die Kartenkanten angepasst), `vorhanden` (an der Stelle lag schon eine Karte – sie wird neu
+erkannt). Gefundene Karten werden normal verfolgt und identifiziert und erscheinen danach im Dock.
