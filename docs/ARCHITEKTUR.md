@@ -98,7 +98,9 @@ Der bisherige Web-Prototyp (`server/`, `public/`) bleibt als Referenz erhalten. 
 4. **Mehrstufige Identifikation mit expliziter Unsicherheit**:
    `Embedding-Top-k` → bei mehreren Drucken gleicher Karte `OCR Nummer/Set` → bei verbleibender Mehrdeutigkeit
    **Status „Druck unsicher“ und kein Preis** (Anforderung: keine falschen Preise).
-5. **Referenzdaten werden lokal gebaut**, nicht ausgeliefert (Bildrechte TPCi/WotC, Scryfall-Richtlinien).
+5. **Referenzbilder werden nicht ausgeliefert** (Bildrechte TPCi/WotC, Scryfall-Richtlinien). Katalog und
+   Erkennungs-Index (Embeddings) kommen als Datenpaket je Spiel, sonst baut die Engine sie lokal
+   (siehe DATENPAKETE.md).
 6. **Preisprovider abstrahiert** (`PriceProvider`-Schnittstelle); Standard: Cardmarket-Preisdatei.
 7. **Detektor austauschbar** hinter `Detector`-Schnittstelle (ONNX-Ausgabe = 4 Ecken + Score + Klasse), damit eine
    Lizenzentscheidung gegen Ultralytics später nur das Modell betrifft.

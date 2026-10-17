@@ -2,8 +2,19 @@
 #   1. Python 3.12 finden oder für den aktuellen Benutzer installieren
 #   2. Virtuelle Umgebung + Pakete (PyTorch mit CUDA, wenn eine NVIDIA-GPU vorhanden ist)
 #   3. Modelle laden
-#   4. Grunddaten aufbauen (Pokémon-Katalog + Referenzbilder + Index, Preise); Magic folgt im Hintergrund
-param([switch]$SkipData)
+#   4. Auswahl speichern (data\config.json: Spiele, Namenssprachen, Paket-Adresse)
+#   5. Kartendaten: je Spiel ein fertiges Datenpaket (Katalog + Erkennungs-Index) installieren;
+#      ohne Paket (offline, noch nicht veröffentlicht) lokal aufbauen (Bilder laden + einbetten)
+#
+#   setup-engine.ps1 -Games pokemon,mtg -Languages de,en [-PackDir D:\packs] [-PackUrl https://…] [-SkipData]
+#   Ohne -Games/-Languages bleibt die bisherige Auswahl (bzw. Standard: Pokémon + Magic, Deutsch + Englisch).
+param(
+    [switch]$SkipData,
+    [string[]]$Games = @(),     # Spielkürzel, z. B. pokemon,mtg
+    [string[]]$Languages = @(), # Sprachcodes, z. B. de,en
+    [string]$PackUrl = "",    # Basis-URL der Datenpakete (leer = Standard/bisherige Einstellung)
+    [string]$PackDir = ""     # lokaler Ordner mit Datenpaketen (Offline-Installation)
+)
 $ErrorActionPreference = "Stop"
 $here = $PSScriptRoot
 Set-Location $here
@@ -54,10 +65,31 @@ Step "Modelle laden"
 & $venvPy -m cardengine.models_fetch
 if ($LASTEXITCODE -ne 0) { throw "Modelle konnten nicht geladen werden" }
 
+Step "Auswahl speichern (Spiele, Namenssprachen)"
+$cfgArgs = @("-m", "cardengine.config")
+# Listen zusammenfügen: "-Games pokemon,mtg" kommt aus PowerShell als Array, über -File als ein Text
+if ($Games) { $cfgArgs += @("--games", ($Games -join ",")) }
+if ($Languages) { $cfgArgs += @("--languages", ($Languages -join ",")) }
+if ($PackUrl) { $cfgArgs += @("--pack-url", $PackUrl) }
+& $venvPy @cfgArgs
+if ($LASTEXITCODE -ne 0) { throw "Einstellungen konnten nicht gespeichert werden" }
+
 if (-not $SkipData) {
-    Step "Grunddaten aufbauen (Pokémon, Preise) – Magic folgt automatisch im Hintergrund"
-    & $venvPy -m cardengine.maintenance --initial
-    if ($LASTEXITCODE -ne 0) { Write-Warning "Grunddaten unvollständig – die Engine ergänzt sie beim nächsten Start." }
+    Step "Kartendaten installieren"
+    Write-Host "Je Spiel wird zuerst ein fertiges Datenpaket (Kartenkatalog + Erkennungs-Index, ohne Bilder) installiert."
+    Write-Host "Ist keines erreichbar, werden die Daten lokal aufgebaut (Kartenbilder laden + einbetten, dauert länger;"
+    Write-Host "Magic-Bilder folgen dann im Hintergrund, während die Engine läuft)."
+    $dataArgs = @("-m", "cardengine.maintenance", "--initial")
+    if ($PackDir) {
+        if (Test-Path $PackDir) {
+            Write-Host "Offline-Pakete: $PackDir"
+            $dataArgs += @("--pack-dir", $PackDir)
+        } else {
+            Write-Warning "Paket-Ordner $PackDir nicht gefunden – es wird die Paket-Adresse bzw. der lokale Aufbau genutzt."
+        }
+    }
+    & $venvPy @dataArgs
+    if ($LASTEXITCODE -ne 0) { Write-Warning "Kartendaten unvollständig – die Engine ergänzt sie beim nächsten Start." }
 }
 
 Step "Fertig"
