@@ -23,7 +23,7 @@ from cardengine.geometry import rectify
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DOCK_HTML = os.path.join(HERE, "dock", "dock.html")
-CM_GAME = {"pokemon": "Pokemon", "mtg": "Magic"}
+CM_GAME = {"pokemon": "Pokemon", "mtg": "Magic", "ygo": "YuGiOh"}
 CM_LANGS = {"de", "en", "fr", "it", "es"}
 CROP_SIZE = (244, 340)
 HIGHLIGHT_S = 3.0

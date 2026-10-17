@@ -1,4 +1,5 @@
-"""Sammlernummer und Set-Code aus dem OCR-Text der Kartenfußzeile lesen (Magic ab 2015, Pokémon)."""
+"""Sammlernummer und Set-Code aus dem OCR-Text der Kartenfußzeile lesen (Magic ab 2015, Pokémon) sowie den
+Yu-Gi-Oh-Set-Code („LOB-DE001“) unter dem Artwork."""
 from __future__ import annotations
 
 import re
@@ -61,3 +62,36 @@ def matches(rec, info: FooterInfo) -> int:
         if re.search(rf"0*{num}\d?0*{rec.set_total}", info.digits):
             score += 1
     return score
+
+
+# ---------------------------------------------------------------- Yu-Gi-Oh
+# Regionskennung im Set-Code: heute EN/DE/FR/IT/SP/PT/JP/KR/AE, früher E/G/F/I/S/P (Europa), ohne = Nordamerika.
+# Der Katalog (YGOPRODeck) kennt nur die englischen Codes → Vergleich über einen regionsunabhängigen Schlüssel.
+YGO_REGIONS = ("EN", "DE", "FR", "IT", "SP", "PT", "JP", "JA", "KR", "AE", "E", "G", "F", "I", "S", "P", "J", "K", "A")
+_YGO_CODE = re.compile(rf"^([A-Z0-9]{{2,5}})-(?:{'|'.join(YGO_REGIONS)})?([A-Z]{{0,3}}\d{{1,4}}[A-Z]?|TKN)$")
+_YGO_IN_TEXT = re.compile(r"(?<![A-Z0-9])([A-Z0-9]{2,5}) ?[-‐‑–—_~.] ?([A-Z]{0,4}[0-9OIL]{2,4}[A-Z]?)(?![A-Z0-9])")
+
+
+def ygo_code_key(code: str) -> str | None:
+    """Sprach-/regionsunabhängiger Schlüssel: "LOB-DE001", "LOB-G001", "LOB-EN001", "LOB-001" → "LOB-001".
+    O/0 und I/1 werden im Präfix gleich behandelt (OCR verwechselt sie, Präfixe enthalten beides)."""
+    m = _YGO_CODE.match(code.strip().upper())
+    if not m:
+        return None
+    prefix, num = m.groups()
+    return f"{prefix.replace('O', '0').replace('I', '1')}-{num}"
+
+
+def parse_ygo_codes(text: str) -> list[str]:
+    """Alle plausiblen Set-Codes im OCR-Text als Schlüssel (siehe `ygo_code_key`), Reihenfolge wie gelesen."""
+    out: list[str] = []
+    for prefix, rest in _YGO_IN_TEXT.findall(text.upper()):
+        # In der Nummer liest die OCR Ziffern gern als Buchstaben ("DEOO1", "ENI23")
+        m = re.match(r"^([A-Z]*?)([0-9OIL]+)([A-Z]?)$", rest)
+        if m:
+            digits = m.group(2).replace("O", "0").replace("I", "1").replace("L", "1")
+            rest = m.group(1) + digits + m.group(3)
+        key = ygo_code_key(f"{prefix}-{rest}")
+        if key and key not in out:
+            out.append(key)
+    return out

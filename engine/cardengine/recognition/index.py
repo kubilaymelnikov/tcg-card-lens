@@ -24,6 +24,7 @@ class EmbeddingIndex:
         self.keys = keys  # "game|id"
         self.vectors = vectors.astype(np.float16)
         self._key_pos = {k: i for i, k in enumerate(keys)}
+        self._masks: dict[tuple[str, ...], np.ndarray] = {}  # Spielauswahl → Maske (einmal berechnet)
 
     @classmethod
     def load(cls, name: str) -> "EmbeddingIndex":
@@ -39,10 +40,15 @@ class EmbeddingIndex:
             np.savez(f, keys=np.array(self.keys), vectors=self.vectors)
         os.replace(tmp, path)
 
-    def search(self, query: np.ndarray, k: int = 10, game: str | None = None) -> list[tuple[str, float]]:
+    def search(self, query: np.ndarray, k: int = 10, game: str | tuple[str, ...] | None = None) -> list[tuple[str, float]]:
+        """`game`: ein Spiel ("pokemon") oder mehrere (Tupel), None = alle."""
         sims = self.vectors @ query.astype(np.float16)
         if game:
-            mask = np.array([key.startswith(game + "|") for key in self.keys])
+            games = (game,) if isinstance(game, str) else tuple(game)
+            mask = self._masks.get(games)
+            if mask is None:
+                prefixes = tuple(g + "|" for g in games)
+                mask = self._masks[games] = np.array([key.startswith(prefixes) for key in self.keys], bool)
             sims = np.where(mask, sims, -1)
         top = np.argpartition(-sims, min(k, len(sims) - 1))[:k]
         top = top[np.argsort(-sims[top])]
@@ -53,15 +59,20 @@ class EmbeddingIndex:
         return None if i is None else self.vectors[i].astype(np.float32)
 
 
-def build_index(embedder, games: tuple[str, ...] = ("pokemon", "mtg"), batch: int = 128) -> EmbeddingIndex:
-    """Embeddings für alle Katalogkarten mit vorhandenem Referenzbild berechnen (inkrementell)."""
+def build_index(embedder, games: tuple[str, ...] = ("pokemon", "mtg", "ygo"), batch: int = 128) -> EmbeddingIndex:
+    """Embeddings für alle Katalogkarten mit vorhandenem Referenzbild berechnen (inkrementell).
+
+    Teilen sich mehrere Einträge eine Bilddatei (Yu-Gi-Oh: ein Artwork, viele Drucke), wird sie nur einmal
+    eingebettet – sonst bestünden die Top-k nur aus Kopien desselben Artworks."""
     old = EmbeddingIndex.load(embedder.index_name) if os.path.exists(index_path(embedder.index_name)) else None
     cat = Catalog()
     keys, vecs, todo = [], [], []
-    for rec in (r for g in games for r in cat.all(g)):
+    seen_images: set[str] = set()
+    for rec in (r for g in games for r in sorted(cat.all(g), key=lambda r: r.id)):
         key = f"{rec.game}|{rec.id}"
-        if not os.path.exists(rec.image_path):
+        if rec.image_path in seen_images or not os.path.exists(rec.image_path):
             continue
+        seen_images.add(rec.image_path)
         v = old.vector(key) if old else None
         if v is not None:
             keys.append(key)

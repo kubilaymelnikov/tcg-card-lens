@@ -2,11 +2,13 @@
 
     python -m cardengine.maintenance --initial   # Setup: Pokémon + Magic-Katalog + Preise (blockierend)
     python -m cardengine.maintenance             # einmal alles prüfen/ergänzen (auch Magic-Bilder)
+    python -m cardengine.maintenance --ygo       # Yu-Gi-Oh-Katalog + Bilder aufbauen (optional, ~15k Bilder)
 
 Im Engine-Prozess läuft `Maintenance.start()` als Hintergrund-Thread:
 - Pokémon-Katalog und -Bilder wöchentlich auf neue Sets prüfen
 - Magic-Bilder schrittweise nachladen (gedrosselt), danach den Embedding-Index ergänzen und neu laden
 - MTGJSON-Preisverlauf wöchentlich ergänzen (verlängert die Historie über 90 Tage hinaus)
+- Yu-Gi-Oh (nur wenn einmal mit `--ygo` aufgebaut): Katalog, Cardmarket-Zuordnung und Bilder wöchentlich ergänzen
 Fortschritt steht in `status` und wird dem OBS-Plugin angezeigt.
 """
 from __future__ import annotations
@@ -63,6 +65,21 @@ class Maintenance:
             self.status = "Magic-Katalog wird aktualisiert"
             build_mtg(cat, sets=[], all_images=False)
             _touch("mtg")
+
+    def ygo(self, force: bool = False) -> int:
+        """Yu-Gi-Oh-Katalog + fehlende Artworks; ohne `force` nur, wenn der Katalog schon existiert. Liefert die
+        Zahl neu geladener Bilder (> 0 → Index ergänzen)."""
+        from .card_database.ygo import build_ygo, download_images as ygo_images
+
+        cat = Catalog()
+        if not force and (cat.count("ygo") == 0 or _age(_stamp("ygo")) <= WEEK):
+            return 0
+        self.status = "Yu-Gi-Oh-Katalog wird aktualisiert"
+        recs = build_ygo(cat)
+        self.status = "Yu-Gi-Oh-Bilder werden geladen"
+        n = ygo_images(recs, progress=self._progress("Yu-Gi-Oh-Bilder"))
+        _touch("ygo")
+        return n
 
     def mtg_images_pending(self) -> list:
         return [r for r in Catalog().all("mtg") if r.image_url and not os.path.exists(r.image_path)]
@@ -124,6 +141,7 @@ class Maintenance:
     def run_once(self) -> None:
         self.pokemon()
         self.mtg_catalog()
+        self.ygo()
         while self.mtg_images_chunk():
             self.index()
         self.index()
@@ -139,6 +157,8 @@ class Maintenance:
                 try:
                     self.pokemon()
                     self.mtg_catalog()
+                    if self.ygo():
+                        self.index()
                     if self.mtg_images_chunk():
                         self.index()
                         continue  # nächster Block sofort
@@ -173,6 +193,7 @@ class _LockedEmbedder:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--initial", action="store_true", help="Setup: Grunddaten ohne Magic-Bilder")
+    ap.add_argument("--ygo", action="store_true", help="Yu-Gi-Oh-Katalog, -Bilder und -Index aufbauen")
     args = ap.parse_args()
     m = Maintenance()
     stop = threading.Event()
@@ -185,7 +206,11 @@ def main():
                 last = m.status
 
     threading.Thread(target=report, daemon=True).start()
-    m.initial() if args.initial else m.run_once()
+    if args.ygo:
+        m.ygo(force=True)
+        m.index()
+    else:
+        m.initial() if args.initial else m.run_once()
     stop.set()
     print("[daten] fertig", flush=True)
 

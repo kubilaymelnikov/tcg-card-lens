@@ -2,9 +2,12 @@
 
 Die offizielle API nimmt keine neuen Nutzer an (help.cardmarket.com, Stand 10/2026). Cardmarket stellt aber
 täglich (~02:44 MEZ) Preisdateien je Spiel ohne Login bereit:
-    https://downloads.s3.cardmarket.com/productCatalog/priceGuide/price_guide_{1|6}.json   (1 = Magic, 6 = Pokémon)
+    https://downloads.s3.cardmarket.com/productCatalog/priceGuide/price_guide_{1|3|6}.json
+    (1 = Magic, 3 = Yu-Gi-Oh!, 6 = Pokémon)
 Felder je idProduct: avg, low, trend, avg1, avg7, avg30 sowie Varianten mit Suffix
 "-foil" (Magic: Foil) bzw. "-holo" (Pokémon: Reverse Holo). 0 bzw. null = keine Daten.
+Yu-Gi-Oh: Die Datei enthält ebenfalls "-foil"-Felder, deren Bedeutung (Yu-Gi-Oh-Karten haben auf Cardmarket kein
+Foil-Attribut, die Seltenheit ist Teil des Produkts) nicht dokumentiert ist → nur der Normalpreis wird verwendet.
 
 Bei jedem neuen Tagesstand werden die Trendpreise als Snapshot in die lokale Historie geschrieben (nur Änderungen).
 """
@@ -23,8 +26,8 @@ from .base import PriceProvider, PriceQuote
 from .store import PriceStore
 
 URL = "https://downloads.s3.cardmarket.com/productCatalog/priceGuide/price_guide_{game_id}.json"
-GAME_IDS = {"mtg": 1, "pokemon": 6}
-VARIANT_SUFFIX = {"mtg": {"normal": "", "foil": "-foil"}, "pokemon": {"normal": "", "reverse": "-holo"}}
+GAME_IDS = {"mtg": 1, "pokemon": 6, "ygo": 3}
+VARIANT_SUFFIX = {"mtg": {"normal": "", "foil": "-foil"}, "pokemon": {"normal": "", "reverse": "-holo"}, "ygo": {"normal": ""}}
 FIELDS = ("trend", "low", "avg", "avg1", "avg7", "avg30")
 MAX_AGE_S = 6 * 3600  # spätestens alle 6 h prüfen, ob es eine neue Tagesdatei gibt (If-Modified-Since)
 

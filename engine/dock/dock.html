@@ -639,7 +639,7 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
       '<div class="pk-msg" data-r="cmsg" hidden>Keine Alternativen vorhanden.</div>' +
       '<div class="search">' +
       '  <input type="search" data-r="q" placeholder="Karte suchen …" autocomplete="off" spellcheck="false" aria-label="Karte suchen">' +
-      '  <select data-r="game" aria-label="Spiel"><option value="">Alle</option><option value="pokemon">Pokémon</option><option value="magic">Magic</option></select>' +
+      '  <select data-r="game" aria-label="Spiel"><option value="">Alle</option><option value="pokemon">Pokémon</option><option value="mtg">Magic</option><option value="ygo">Yu-Gi-Oh!</option></select>' +
       '</div>' +
       '<div class="pk-msg" data-r="smsg" hidden></div>' +
       '<div class="pk-list" data-r="results"></div>' +
@@ -662,7 +662,7 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
       },
       update: function () {
         var c = t.shown || {};
-        if (!p.gameSet && c.game) { r.game.value = c.game === 'magic' || c.game === 'pokemon' ? c.game : ''; p.gameSet = true; }
+        if (!p.gameSet && c.game) { r.game.value = ['mtg', 'pokemon', 'ygo'].indexOf(c.game) >= 0 ? c.game : ''; p.gameSet = true; }
         show(r.foot, t.mode === 'compact');
         var cands = Array.isArray(c.candidates) ? c.candidates : [];
         var sig = JSON.stringify([c.key, cands]);

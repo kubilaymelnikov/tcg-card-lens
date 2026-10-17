@@ -157,12 +157,14 @@ class LearnedStore:
             if crop_bgr is not None:
                 self._add_sample(crop_bgr, None, "no_card", meta)
 
-    def match(self, embedding: np.ndarray, game: str | None = None) -> tuple[str, float, float] | None:
-        """Beste gelernte Karte: (Schlüssel, max. Kosinus, Abstand zur besten anderen gelernten Karte)."""
+    def match(self, embedding: np.ndarray, game: str | tuple[str, ...] | None = None) -> tuple[str, float, float] | None:
+        """Beste gelernte Karte: (Schlüssel, max. Kosinus, Abstand zur besten anderen gelernten Karte).
+        `game`: ein Spiel oder mehrere (Tupel), None = alle."""
         q = _norm(embedding)
+        prefixes = tuple(g + "|" for g in ((game,) if isinstance(game, str) else game or ()))
         with self._lock:
             scores = [(k, float(np.max(np.stack(vs) @ q))) for k, vs in self._refs.items()
-                      if vs and (not game or k.startswith(game + "|"))]
+                      if vs and (not prefixes or k.startswith(prefixes))]
         if not scores:
             return None
         scores.sort(key=lambda x: x[1], reverse=True)

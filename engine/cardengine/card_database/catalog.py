@@ -12,18 +12,18 @@ IMG_DIR = os.path.join(DATA_DIR, "refimg")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS cards (
-  game            TEXT NOT NULL,      -- 'mtg' | 'pokemon'
-  id              TEXT NOT NULL,      -- Scryfall-ID bzw. TCGdex-ID
+  game            TEXT NOT NULL,      -- 'mtg' | 'pokemon' | 'ygo'
+  id              TEXT NOT NULL,      -- Scryfall-ID, TCGdex-ID bzw. Yu-Gi-Oh "<passcode>-<set-code>-<seltenheit>"
   name            TEXT NOT NULL,
-  set_code        TEXT NOT NULL,
+  set_code        TEXT NOT NULL,      -- Yu-Gi-Oh: Präfix des Set-Codes ("LOB"), leer bei reinen Artwork-Einträgen
   set_name        TEXT,
-  number          TEXT NOT NULL,      -- Sammlernummer wie gedruckt (ohne Setgröße)
+  number          TEXT NOT NULL,      -- Sammlernummer wie gedruckt (ohne Setgröße); Yu-Gi-Oh: "EN001"
   set_total       INTEGER,            -- gedruckte Setgröße (Pokémon "123/165"), sonst NULL
   lang            TEXT,
   released        TEXT,
   cardmarket_id   INTEGER,
-  illustration_id TEXT,               -- gleiches Artwork über Reprints hinweg (Magic)
-  finishes        TEXT,               -- z. B. 'nonfoil,foil' / 'normal,holo,reverse'
+  illustration_id TEXT,               -- gleiches Artwork über Reprints hinweg (Magic; Yu-Gi-Oh: Bild-ID)
+  finishes        TEXT,               -- z. B. 'nonfoil,foil' / 'normal,holo,reverse'; Yu-Gi-Oh: Seltenheit
   image_url       TEXT,
   PRIMARY KEY (game, id)
 );
@@ -56,10 +56,17 @@ class CardRecord:
 
     @property
     def printed_number(self) -> str:
+        if self.game == "ygo":
+            return f"{self.set_code}-{self.number}" if self.set_code else ""  # wie gedruckt: "LOB-EN001"
         return f"{self.number}/{self.set_total}" if self.set_total else self.number
 
 
 def image_path(game: str, card_id: str) -> str:
+    if game == "ygo":
+        # Viele Drucke teilen ein Artwork → eine Bilddatei je Artwork (Bild-ID von YGOPRODeck):
+        # "<passcode>-<set-code>-<seltenheit>" → <passcode>.jpg, "<passcode>-art<bild-id>" → <bild-id>.jpg
+        head, _, rest = card_id.partition("-")
+        card_id = rest[3:] if rest.startswith("art") else head
     safe = card_id.replace("/", "_").replace("\\", "_").replace(":", "_")
     return os.path.join(IMG_DIR, game, f"{safe}.jpg")
 
@@ -102,6 +109,9 @@ class Catalog:
     def same_card(self, rec: CardRecord) -> list[CardRecord]:
         """Alle Drucke mit gleichem Namen (Kandidaten für die Editionsunterscheidung)."""
         return self._rows("WHERE game = ? AND name = ?", (rec.game, rec.name))
+
+    def by_name(self, game: str, name: str) -> list[CardRecord]:
+        return self._rows("WHERE game = ? AND name = ?", (game, name))
 
     def by_set_number(self, game: str, set_code: str, number: str) -> list[CardRecord]:
         return self._rows("WHERE game = ? AND upper(set_code) = upper(?) AND number = ?", (game, set_code, number))

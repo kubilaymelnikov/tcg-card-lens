@@ -144,7 +144,7 @@ class CardPipeline:
         self.detector = detector
         self.identifier = identifier
         self.prices = prices  # pricing.service.PriceService (optional)
-        self.game: str | None = None  # nur in diesem Spiel suchen ("pokemon" | "mtg" | None = beide)
+        self.game: str | tuple[str, ...] | None = None  # nur in diesen Spielen suchen (siehe games.parse_games; None = alle)
         self.min_score = 0.0  # Erkennungsempfindlichkeit: Detektionen darunter werden verworfen
         self.events: list[tuple[str, int]] = []  # (Ereignis, Track-ID) für Debug-Snapshots; vom Aufrufer geleert
         self.on_identity = None  # optionaler Rückruf (identity) im Identifikations-Thread, z. B. Namen übersetzen
