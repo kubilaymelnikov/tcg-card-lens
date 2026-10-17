@@ -35,8 +35,8 @@ if (-not (Test-Path $venvPy)) { & $py -m venv (Join-Path $here ".venv") }
 & $venvPy -m pip install --upgrade pip --quiet
 
 Step "PyTorch installieren"
-$gpu = $false
-try { $null = & nvidia-smi -L 2>$null; $gpu = ($LASTEXITCODE -eq 0) } catch {}
+# GPU über die Windows-Geräteliste erkennen (nvidia-smi-Ausgabe auf stderr bricht unter "Stop" ab)
+$gpu = [bool](Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "NVIDIA" })
 if ($gpu) {
     Write-Host "NVIDIA-GPU gefunden – PyTorch mit CUDA 13.0 (ca. 2 GB Download)"
     & $venvPy -m pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cu130
