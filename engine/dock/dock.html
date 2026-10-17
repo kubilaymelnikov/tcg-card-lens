@@ -1,0 +1,803 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Karten</title>
+<style>
+:root {
+  --bg: #1e1f25;
+  --panel: #25272f;
+  --tile: #2b2e38;
+  --tile-hi: #323644;
+  --border: #3a3e4b;
+  --text: #e6e8ee;
+  --muted: #9aa0ad;
+  --dim: #6f7583;
+  --accent: #4c8df0;
+  --accent-2: #2f6fd6;
+  --ok: #3fb950;
+  --warn: #f0b429;
+  --bad: #f2564b;
+  --hl: #ffd75a;
+  --radius: 6px;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); }
+body {
+  font: 13px/1.35 "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+  min-width: 260px;
+}
+button, input, select { font: inherit; color: inherit; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ---------- Kopf ---------- */
+header {
+  position: sticky; top: 0; z-index: 5;
+  background: var(--panel); border-bottom: 1px solid var(--border);
+  padding: 6px 8px; display: flex; flex-direction: column; gap: 5px;
+}
+.hrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.status { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 auto; }
+.status-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex: none; }
+.dot.ok { background: var(--ok); box-shadow: 0 0 6px rgba(63,185,80,.6); }
+.dot.err { background: var(--bad); }
+.learned { color: var(--muted); white-space: nowrap; font-size: 12px; }
+.learned b { color: var(--text); font-weight: 600; }
+.ctrl { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; }
+.ctrl select {
+  background: var(--tile); border: 1px solid var(--border); border-radius: 4px;
+  padding: 2px 4px; max-width: 170px;
+}
+.ctrl input[type=checkbox] { accent-color: var(--accent); margin: 0; }
+.ctrl label { display: flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; }
+.spacer { flex: 1 1 auto; }
+
+.offline {
+  margin: 6px 8px 0; padding: 5px 8px; border-radius: var(--radius);
+  background: rgba(242,86,75,.12); border: 1px solid rgba(242,86,75,.35); color: #ffb3ad; font-size: 12px;
+}
+main { padding: 6px 8px 8px; transition: opacity .2s; }
+main.stale { opacity: .55; }
+
+/* ---------- Abschnitte ---------- */
+section { margin-top: 6px; }
+h2 {
+  margin: 4px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted); display: flex; align-items: center; gap: 6px;
+}
+h2 .count {
+  background: var(--tile); border: 1px solid var(--border); border-radius: 9px; padding: 0 6px;
+  font-size: 11px; letter-spacing: 0; color: var(--text);
+}
+#sec-confirm h2 { color: var(--warn); }
+#sec-confirm h2 .count { background: rgba(240,180,41,.15); border-color: rgba(240,180,41,.45); }
+.grid { display: grid; gap: 6px; align-items: start; }
+.grid-confirm { grid-template-columns: repeat(auto-fill, minmax(min(100%, 262px), 1fr)); }
+.grid-seen { grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); }
+.empty { color: var(--dim); font-size: 12px; padding: 14px 4px; text-align: center; }
+
+/* ---------- Kacheln ---------- */
+.tile {
+  background: var(--tile); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 6px; min-width: 0; outline: none; transition: border-color .15s, box-shadow .15s, background .15s;
+}
+.tile:hover, .tile:focus-within { background: var(--tile-hi); border-color: #4a5060; }
+.tile:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.tile.hl { border-color: var(--hl); box-shadow: 0 0 0 1px var(--hl), 0 0 10px rgba(255,215,90,.25); }
+.tile.busy { opacity: .7; cursor: progress; }
+.tile-confirm { border-color: rgba(240,180,41,.55); background: linear-gradient(180deg, rgba(240,180,41,.08), transparent 70px), var(--tile); }
+
+.badge {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  min-width: 22px; height: 22px; padding: 0 5px; border-radius: 5px;
+  background: var(--accent); color: #fff; font-weight: 700; font-size: 13px; line-height: 1;
+}
+.badge-lg { min-width: 38px; height: 38px; font-size: 22px; border-radius: 7px; background: var(--warn); color: #1e1f25; }
+.tile.hl .badge { background: var(--hl); color: #1e1f25; }
+
+.img {
+  position: relative; aspect-ratio: 63 / 88; width: 100%; border-radius: 4px; overflow: hidden;
+  background: #22242b; border: 1px solid #343846;
+}
+.img img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.img.missing img { visibility: hidden; }
+.img.missing::after {
+  content: ""; position: absolute; inset: 18% 22%; border: 2px dashed #3d4250; border-radius: 4px;
+}
+
+/* Bestätigen */
+.ct-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.ct-q { flex: 1 1 auto; min-width: 0; }
+.ct-q .q { font-weight: 600; font-size: 14px; }
+.ct-q .src { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sim { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--warn); white-space: nowrap; }
+.sim small { color: var(--muted); font-weight: 400; }
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.compare figure { margin: 0; min-width: 0; }
+.compare figcaption { text-align: center; color: var(--muted); font-size: 11px; margin-top: 2px; }
+.info { margin-top: 6px; min-width: 0; }
+.name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile-confirm .name { font-size: 14px; }
+.meta { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reason { color: #d9b866; font-size: 12px; margin-top: 2px; }
+.actions { display: flex; gap: 5px; margin-top: 7px; flex-wrap: wrap; align-items: center; }
+.hint {
+  padding: 4px 8px; border-radius: 4px; background: rgba(240,180,41,.15); color: var(--warn);
+  font-weight: 600; font-size: 12px;
+}
+
+.btn {
+  border: 1px solid var(--border); background: #353946; border-radius: 4px; padding: 4px 10px;
+  cursor: pointer; white-space: nowrap; line-height: 1.3;
+}
+.btn:hover:not(:disabled) { background: #3f4453; border-color: #52586a; }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.btn:disabled { opacity: .5; cursor: default; }
+.btn.primary { background: var(--accent-2); border-color: var(--accent); color: #fff; font-weight: 600; min-width: 56px; }
+.btn.primary:hover:not(:disabled) { background: var(--accent); }
+.btn.danger { color: #ffb3ad; }
+.btn.sm { padding: 2px 7px; font-size: 12px; }
+.btn.icon { padding: 2px 7px; font-size: 13px; }
+.btn[aria-expanded=true] { background: #424859; }
+
+/* Erkannt (kompakt) */
+.cm { display: grid; grid-template-columns: auto 50px minmax(0, 1fr); gap: 7px; align-items: start; }
+.cm .img { width: 50px; }
+.cm-info { min-width: 0; }
+.cm-line { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; margin-top: 2px; font-size: 12px; }
+.price { font-weight: 600; font-variant-numeric: tabular-nums; }
+.price.none { color: var(--dim); font-weight: 400; }
+.chg { font-variant-numeric: tabular-nums; font-size: 11px; }
+.chg.up { color: var(--ok); }
+.chg.down { color: var(--bad); }
+.chg.flat { color: var(--muted); }
+.tag { font-size: 10px; padding: 0 5px; border-radius: 8px; border: 1px solid; line-height: 15px; white-space: nowrap; }
+.tag.confirmed { color: var(--ok); border-color: rgba(63,185,80,.5); }
+.tag.learned { color: #8ab8ff; border-color: rgba(76,141,240,.5); }
+.tag.unsure { color: var(--warn); border-color: rgba(240,180,41,.5); }
+.tag.failed { color: var(--bad); border-color: rgba(242,86,75,.5); }
+.cm-act { display: flex; align-items: center; gap: 5px; margin-top: 4px; flex-wrap: wrap; font-size: 12px; }
+.cm-act a { margin-right: auto; }
+.src-sm { color: var(--dim); font-size: 11px; }
+
+/* Alternativen / Suche */
+.picker { margin-top: 7px; border-top: 1px solid var(--border); padding-top: 6px; }
+.pk-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 2px 0 4px; }
+.pk-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); gap: 4px; }
+.pk-msg { color: var(--dim); font-size: 12px; padding: 2px 0; }
+.opt {
+  display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 6px; align-items: center; text-align: left;
+  background: #262932; border: 1px solid var(--border); border-radius: 4px; padding: 3px; cursor: pointer; min-width: 0;
+}
+.opt:hover:not(:disabled), .opt:focus-visible { border-color: var(--accent); background: #2d3240; outline: none; }
+.opt:disabled { opacity: .5; cursor: default; }
+.opt .img { width: 34px; border-radius: 3px; }
+.opt-t { min-width: 0; }
+.opt-n { font-weight: 600; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.opt-s { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.opt-p { color: var(--dim); font-size: 11px; }
+.opt.current { border-color: rgba(63,185,80,.6); }
+.search { display: flex; gap: 4px; margin: 7px 0 4px; }
+.search input, .search select {
+  background: #1b1c22; border: 1px solid var(--border); border-radius: 4px; padding: 4px 6px; min-width: 0;
+}
+.search input { flex: 1 1 auto; }
+.search input:focus, .search select:focus { outline: none; border-color: var(--accent); }
+.pk-foot { display: flex; justify-content: flex-end; margin-top: 5px; }
+
+footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 1px solid #2a2c34; margin-top: 8px; }
+
+#toast {
+  position: fixed; left: 8px; right: 8px; bottom: 8px; z-index: 20; display: flex; justify-content: center; pointer-events: none;
+}
+#toast div {
+  background: #3a2326; border: 1px solid rgba(242,86,75,.6); color: #ffd2ce; padding: 6px 10px; border-radius: 5px;
+  font-size: 12px; max-width: 420px; box-shadow: 0 4px 14px rgba(0,0,0,.4); opacity: 0; transform: translateY(6px);
+  transition: opacity .2s, transform .2s;
+}
+#toast div.ok { background: #1f3326; border-color: rgba(63,185,80,.6); color: #c9f0d1; }
+#toast div.show { opacity: 1; transform: none; }
+</style>
+</head>
+<body>
+<header>
+  <div class="hrow">
+    <div class="status"><span class="dot" id="dot"></span><span class="status-text" id="status">Verbinde …</span></div>
+    <span class="learned" id="learned" hidden></span>
+  </div>
+  <div class="hrow ctrl">
+    <span id="src-wrap" hidden>Quelle <select id="src" aria-label="Quelle"></select></span>
+    <span class="spacer"></span>
+    <label><input type="checkbox" id="unsure"> nur unsichere</label>
+  </div>
+</header>
+<div class="offline" id="offline" hidden>Engine nicht erreichbar – startet OBS-Filter? Neuer Versuch läuft …</div>
+<main id="main">
+  <section id="sec-confirm" hidden>
+    <h2>Bitte bestätigen <span class="count" id="cnt-confirm">0</span></h2>
+    <div class="grid grid-confirm" id="grid-confirm"></div>
+  </section>
+  <section id="sec-seen">
+    <h2>Erkannt <span class="count" id="cnt-seen">0</span></h2>
+    <div class="grid grid-seen" id="grid-seen"></div>
+    <div class="empty" id="empty-seen" hidden>Keine Karten im Bild.</div>
+  </section>
+</main>
+<footer>Bestätigungen werden lokal gelernt und als Trainingsdaten gespeichert.</footer>
+<div id="toast" aria-live="polite"></div>
+
+<script>
+'use strict';
+(function () {
+  var POLL_MS = 500, POLL_FAIL_MS = 1500, HL_MS = 1500, SEARCH_MS = 300;
+
+  // ---------- Hilfsfunktionen ----------
+  function $(id) { return document.getElementById(id); }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function setText(node, t) {
+    t = t == null ? '' : String(t);
+    if (node.textContent !== t) node.textContent = t;
+  }
+  function show(node, on) { on = !!on; if (node.hidden === on) node.hidden = !on; }
+  function cls(node, c, on) { node.classList.toggle(c, !!on); }
+  function refs(root) {
+    var r = {};
+    root.querySelectorAll('[data-r]').forEach(function (n) { r[n.getAttribute('data-r')] = n; });
+    return r;
+  }
+  var store = {
+    get: function (k, d) { try { var v = localStorage.getItem(k); return v == null ? d : v; } catch (e) { return d; } },
+    set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) { /* egal */ } }
+  };
+
+  var moneyFmt = {};
+  function money(v, cur) {
+    cur = cur || 'EUR';
+    try {
+      if (!moneyFmt[cur]) moneyFmt[cur] = new Intl.NumberFormat('de-DE', { style: 'currency', currency: cur });
+      return moneyFmt[cur].format(v);
+    } catch (e) { return Number(v).toFixed(2).replace('.', ',') + ' ' + cur; }
+  }
+  var pctFmt = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 1, minimumFractionDigits: 1 });
+  function pct(sim) {
+    if (typeof sim !== 'number' || !isFinite(sim)) return '';
+    return Math.round(sim * 100) + ' %';
+  }
+  function metaLine(c) {
+    var parts = [];
+    var set = c.set_name || '';
+    if (c.set_code) set = set ? set + ' (' + c.set_code + ')' : c.set_code;
+    if (set) parts.push(set);
+    if (c.number) parts.push('Nr. ' + c.number);
+    return parts.join(' · ');
+  }
+  function labelCmp(a, b) {
+    var la = String(a || ''), lb = String(b || '');
+    return la.length - lb.length || (la < lb ? -1 : la > lb ? 1 : 0);
+  }
+
+  // Bild-Box: <div class="img missing"><img></div>; lädt nur neu, wenn sich die URL ändert, ohne Flackern.
+  function imgBox(extra) {
+    var box = el('div', 'img missing' + (extra ? ' ' + extra : ''));
+    var img = el('img');
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.alt = '';
+    img.addEventListener('load', function () { box.classList.remove('missing'); });
+    img.addEventListener('error', function () { box.classList.add('missing'); });
+    box.appendChild(img);
+    box._url = undefined;
+    return box;
+  }
+  function setImg(box, url) {
+    url = url || null;
+    if (box._url === url) return;
+    box._url = url;
+    var img = box.firstElementChild;
+    if (!url) { img.removeAttribute('src'); box.classList.add('missing'); return; }
+    if (!img.getAttribute('src') || box.classList.contains('missing')) { img.src = url; return; }
+    // Vorladen, dann tauschen – so bleibt das alte Bild bis zum Wechsel stehen.
+    var pre = new Image();
+    pre.onload = pre.onerror = function () { if (box._url === url) img.src = url; };
+    pre.src = url;
+  }
+
+  // ---------- Toast ----------
+  var toastBox = $('toast'), toastTimer = null;
+  function toast(msg, kind) {
+    toastBox.textContent = '';
+    var d = el('div', kind === 'ok' ? 'ok' : '', msg);
+    toastBox.appendChild(d);
+    requestAnimationFrame(function () { d.classList.add('show'); });
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { d.classList.remove('show'); }, kind === 'ok' ? 1800 : 4000);
+  }
+
+  // ---------- Netzwerk ----------
+  function fetchJson(url, opts, timeoutMs) {
+    opts = opts || {};
+    var ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    var to = ctl ? setTimeout(function () { ctl.abort(); }, timeoutMs || 4000) : null;
+    if (ctl) opts.signal = ctl.signal;
+    opts.cache = 'no-store';
+    return fetch(url, opts).then(function (r) {
+      return r.json().catch(function () { return null; }).then(function (j) {
+        if (to) clearTimeout(to);
+        return { ok: r.ok, status: r.status, json: j };
+      });
+    }, function (e) { if (to) clearTimeout(to); throw e; });
+  }
+  function post(path, body) {
+    return fetchJson(path, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    }, 6000).then(function (r) {
+      if (!r.ok || !r.json || r.json.ok === false) {
+        throw new Error((r.json && r.json.error) || ('HTTP ' + r.status));
+      }
+      return r.json;
+    });
+  }
+  function postQuiet(path, body) {
+    return post(path, body).then(function () { pollNow(); }, function () { /* Highlight-Fehler still ignorieren */ });
+  }
+
+  // ---------- Zustand ----------
+  var state = null, failCount = 0, pollTimer = null, inflight = false, again = false, everOk = false;
+  var selSession = store.get('tcl.dock.session', '*');
+  var onlyUnsure = store.get('tcl.dock.unsure', '0') === '1';
+  var tiles = new Map();    // "session|track" -> Kachel
+  var pickers = new Map();  // "session|track" -> Alternativen-/Suchauswahl (überlebt Moduswechsel)
+
+  var ui = {
+    dot: $('dot'), status: $('status'), learned: $('learned'), srcWrap: $('src-wrap'), src: $('src'),
+    unsure: $('unsure'), offline: $('offline'), main: $('main'),
+    secConfirm: $('sec-confirm'), gridConfirm: $('grid-confirm'), cntConfirm: $('cnt-confirm'),
+    secSeen: $('sec-seen'), gridSeen: $('grid-seen'), cntSeen: $('cnt-seen'), emptySeen: $('empty-seen')
+  };
+  ui.unsure.checked = onlyUnsure;
+  ui.unsure.addEventListener('change', function () {
+    onlyUnsure = ui.unsure.checked;
+    store.set('tcl.dock.unsure', onlyUnsure ? '1' : '0');
+    render();
+  });
+  ui.src.addEventListener('change', function () {
+    selSession = ui.src.value;
+    store.set('tcl.dock.session', selSession);
+    render();
+  });
+
+  function poll() {
+    clearTimeout(pollTimer);
+    if (inflight) { again = true; return; }
+    inflight = true;
+    fetchJson('/api/state', {}, 2500).then(function (r) {
+      if (!r.ok || !r.json) throw new Error('HTTP ' + r.status);
+      state = r.json; failCount = 0; everOk = true;
+      render();
+    }).catch(function () {
+      failCount++;
+      renderOffline();
+    }).then(function () {
+      inflight = false;
+      if (again) { again = false; poll(); }
+      else pollTimer = setTimeout(poll, failCount ? POLL_FAIL_MS : POLL_MS);
+    });
+  }
+  function pollNow() { poll(); }
+
+  function renderOffline() {
+    if (failCount < 2 && everOk) return; // einzelne Aussetzer nicht anzeigen
+    show(ui.offline, true);
+    cls(ui.main, 'stale', everOk);
+    ui.dot.className = 'dot err';
+    setText(ui.status, 'Engine nicht erreichbar');
+  }
+
+  // ---------- Hervorheben ----------
+  var hover = null; // {key, sid, timer}
+  function hlStart(t) {
+    if (hover && hover.key === t.key) return;
+    hlStop(hover && hover.sid === t.sid); // gleiche Quelle: neues Label ersetzt das alte, kein null nötig
+    var send = function () {
+      if (t.card && t.card.label) postQuiet('/api/highlight', { session: t.sid, label: t.card.label });
+    };
+    hover = { key: t.key, sid: t.sid, timer: setInterval(send, HL_MS) };
+    send();
+  }
+  function hlStop(silent) {
+    if (!hover) return;
+    clearInterval(hover.timer);
+    if (!silent) postQuiet('/api/highlight', { session: hover.sid, label: null });
+    hover = null;
+  }
+  function bindHover(t) {
+    var e = t.el;
+    e.addEventListener('mouseenter', function () { hlStart(t); });
+    e.addEventListener('mouseleave', function () {
+      if (!e.contains(document.activeElement) && hover && hover.key === t.key) hlStop();
+    });
+    e.addEventListener('focusin', function () { hlStart(t); });
+    e.addEventListener('focusout', function (ev) {
+      if (ev.relatedTarget && e.contains(ev.relatedTarget)) return;
+      if (e.matches(':hover')) return;
+      if (hover && hover.key === t.key) hlStop();
+    });
+  }
+
+  // ---------- Aktionen ----------
+  function act(t, path, body, okMsg) {
+    if (t.busy) return Promise.resolve(false);
+    t.busy = true;
+    t.el.classList.add('busy');
+    var btns = Array.prototype.slice.call(t.el.querySelectorAll('button'));
+    btns.forEach(function (b) { b.disabled = true; });
+    return post(path, body).then(function () {
+      if (okMsg) toast(okMsg, 'ok');
+      return true;
+    }, function (e) {
+      toast('Fehler: ' + (e && e.message ? e.message : 'Anfrage fehlgeschlagen'));
+      return false;
+    }).then(function (ok) {
+      t.busy = false;
+      t.el.classList.remove('busy');
+      btns.forEach(function (b) { b.disabled = false; });
+      pollNow();
+      return ok;
+    });
+  }
+  function confirmKey(t, key) {
+    if (!key) return;
+    act(t, '/api/confirm', { session: t.sid, track: t.track, key: key }, 'Bestätigt – wird gelernt.').then(function (ok) {
+      if (ok) { var p = pickers.get(t.key); if (p) p.setOpen(false); }
+    });
+  }
+  function rejectCard(t) {
+    act(t, '/api/reject', { session: t.sid, track: t.track }, 'Als „Keine Karte“ gemerkt.');
+  }
+  function refreshCard(t) {
+    act(t, '/api/refresh', { session: t.sid, track: t.track });
+  }
+
+  // ---------- Alternativen / Suche ----------
+  function optButton(o, current, onPick) {
+    var b = el('button', 'opt' + (current ? ' current' : ''));
+    b.type = 'button';
+    var box = imgBox();
+    setImg(box, o.image);
+    var tx = el('div', 'opt-t');
+    tx.appendChild(el('div', 'opt-n', o.name || o.key || '?'));
+    var sub = [];
+    var set = o.set_name || o.set_code || '';
+    if (set) sub.push(set);
+    if (o.number) sub.push('Nr. ' + o.number);
+    tx.appendChild(el('div', 'opt-s', sub.join(' · ') || ' '));
+    if (typeof o.similarity === 'number' || current) {
+      tx.appendChild(el('div', 'opt-p', (current ? 'aktuell' : '') +
+        (current && typeof o.similarity === 'number' ? ' · ' : '') + pct(o.similarity)));
+    }
+    b.title = [o.name, o.set_name, o.number].filter(Boolean).join(' – ') + ' (wählen)';
+    b.appendChild(box);
+    b.appendChild(tx);
+    b.addEventListener('click', function () { onPick(o.key); });
+    return b;
+  }
+
+  function makePicker(key) {
+    var root = el('div', 'picker');
+    root.hidden = true;
+    root.innerHTML =
+      '<div class="pk-title" data-r="ctitle">Alternativen</div>' +
+      '<div class="pk-list" data-r="cands"></div>' +
+      '<div class="pk-msg" data-r="cmsg" hidden>Keine Alternativen vorhanden.</div>' +
+      '<div class="search">' +
+      '  <input type="search" data-r="q" placeholder="Karte suchen …" autocomplete="off" spellcheck="false" aria-label="Karte suchen">' +
+      '  <select data-r="game" aria-label="Spiel"><option value="">Alle</option><option value="pokemon">Pokémon</option><option value="magic">Magic</option></select>' +
+      '</div>' +
+      '<div class="pk-msg" data-r="smsg" hidden></div>' +
+      '<div class="pk-list" data-r="results"></div>' +
+      '<div class="pk-foot" data-r="foot" hidden><button type="button" class="btn sm danger" data-r="reject">Keine Karte</button></div>';
+    var r = refs(root);
+    var p = {
+      el: root, key: key, open: false, sig: null, gameSet: false, timer: null, req: 0, tile: null,
+      setOpen: function (on) {
+        p.open = !!on;
+        show(root, p.open);
+        if (p.tile && p.tile.r.other) p.tile.r.other.setAttribute('aria-expanded', p.open ? 'true' : 'false');
+      },
+      update: function (t) {
+        p.tile = t;
+        var c = t.card || {};
+        if (!p.gameSet && c.game) { r.game.value = c.game === 'magic' || c.game === 'pokemon' ? c.game : ''; p.gameSet = true; }
+        show(r.foot, t.mode === 'compact');
+        var cands = Array.isArray(c.candidates) ? c.candidates : [];
+        var sig = JSON.stringify([c.key, cands]);
+        if (sig === p.sig) return;
+        p.sig = sig;
+        r.cands.textContent = '';
+        cands.forEach(function (o) {
+          r.cands.appendChild(optButton(o, o.key === c.key, function (k) { confirmKey(p.tile, k); }));
+        });
+        show(r.cmsg, cands.length === 0);
+        if (t.busy) r.cands.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+      }
+    };
+    function search() {
+      clearTimeout(p.timer);
+      var q = r.q.value.trim();
+      var id = ++p.req;
+      if (q.length < 2) {
+        r.results.textContent = '';
+        show(r.smsg, q.length === 1);
+        setText(r.smsg, 'Mindestens 2 Zeichen eingeben.');
+        return;
+      }
+      p.timer = setTimeout(function () {
+        show(r.smsg, true);
+        setText(r.smsg, 'Suche …');
+        var url = '/api/search?q=' + encodeURIComponent(q) + '&limit=20' +
+          (r.game.value ? '&game=' + encodeURIComponent(r.game.value) : '');
+        fetchJson(url, {}, 5000).then(function (res) {
+          if (id !== p.req) return;
+          if (!res.ok || !res.json) throw new Error('HTTP ' + res.status);
+          var list = Array.isArray(res.json.results) ? res.json.results : [];
+          r.results.textContent = '';
+          var cur = p.tile && p.tile.card ? p.tile.card.key : null;
+          list.forEach(function (o) {
+            r.results.appendChild(optButton(o, o.key === cur, function (k) { confirmKey(p.tile, k); }));
+          });
+          show(r.smsg, list.length === 0);
+          setText(r.smsg, 'Keine Treffer.');
+        }).catch(function () {
+          if (id !== p.req) return;
+          show(r.smsg, true);
+          setText(r.smsg, 'Suche fehlgeschlagen.');
+        });
+      }, SEARCH_MS);
+    }
+    r.q.addEventListener('input', search);
+    r.game.addEventListener('change', search);
+    r.q.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { if (r.q.value) { r.q.value = ''; search(); } else p.setOpen(false); }
+    });
+    r.reject.addEventListener('click', function () { if (p.tile) rejectCard(p.tile); });
+    p.r = r;
+    return p;
+  }
+  function getPicker(key) {
+    var p = pickers.get(key);
+    if (!p) { p = makePicker(key); pickers.set(key, p); }
+    return p;
+  }
+
+  // ---------- Kacheln ----------
+  var CONFIRM_HTML =
+    '<div class="ct-head">' +
+    '  <span class="badge badge-lg" data-r="badge"></span>' +
+    '  <div class="ct-q"><div class="q">Ist das die Karte?</div><div class="src" data-r="src"></div></div>' +
+    '  <span class="sim" data-r="sim" title="Ähnlichkeit"></span>' +
+    '</div>' +
+    '<div class="compare">' +
+    '  <figure data-r="fcrop"><figcaption>Kamera</figcaption></figure>' +
+    '  <figure data-r="fimage"><figcaption>Referenz</figcaption></figure>' +
+    '</div>' +
+    '<div class="info">' +
+    '  <div class="name" data-r="name"></div>' +
+    '  <div class="meta" data-r="meta"></div>' +
+    '  <div class="reason" data-r="reason"></div>' +
+    '</div>' +
+    '<div class="actions">' +
+    '  <button type="button" class="btn primary" data-r="yes">Ja</button>' +
+    '  <span class="hint" data-r="hint" hidden>Druck wählen</span>' +
+    '  <button type="button" class="btn danger" data-r="reject">Keine Karte</button>' +
+    '  <button type="button" class="btn" data-r="other" aria-expanded="false">Andere …</button>' +
+    '</div>';
+
+  var COMPACT_HTML =
+    '<div class="cm">' +
+    '  <span class="badge" data-r="badge"></span>' +
+    '  <div data-r="imgslot"></div>' +
+    '  <div class="cm-info">' +
+    '    <div class="name" data-r="name"></div>' +
+    '    <div class="meta" data-r="meta"></div>' +
+    '    <div class="cm-line">' +
+    '      <span class="price" data-r="price"></span><span class="chg" data-r="chg" title="Änderung 30 Tage"></span>' +
+    '      <span class="tag" data-r="tag" hidden></span><span class="src-sm" data-r="src"></span>' +
+    '    </div>' +
+    '    <div class="cm-act">' +
+    '      <a data-r="cm" target="_blank" rel="noopener" hidden>Cardmarket ↗</a>' +
+    '      <button type="button" class="btn icon" data-r="refresh" title="Aktualisieren" aria-label="Aktualisieren">⟳</button>' +
+    '      <button type="button" class="btn sm" data-r="other" aria-expanded="false">Falsch?</button>' +
+    '    </div>' +
+    '  </div>' +
+    '</div>';
+
+  function makeTile(key, sid, track, mode) {
+    var e = el('article', 'tile ' + (mode === 'confirm' ? 'tile-confirm' : 'tile-compact'));
+    e.tabIndex = 0;
+    e.innerHTML = mode === 'confirm' ? CONFIRM_HTML : COMPACT_HTML;
+    var t = { key: key, sid: sid, track: track, mode: mode, el: e, r: refs(e), card: null, busy: false, autoOpened: false };
+    var r = t.r;
+    if (mode === 'confirm') {
+      r.crop = imgBox(); r.fcrop.insertBefore(r.crop, r.fcrop.firstChild);
+      r.image = imgBox(); r.fimage.insertBefore(r.image, r.fimage.firstChild);
+      r.yes.addEventListener('click', function () { if (t.card) confirmKey(t, t.card.key); });
+      r.reject.addEventListener('click', function () { rejectCard(t); });
+    } else {
+      r.image = imgBox(); r.imgslot.replaceWith(r.image);
+      r.refresh.addEventListener('click', function () { refreshCard(t); });
+    }
+    var p = getPicker(key);
+    e.appendChild(p.el);
+    r.other.addEventListener('click', function () {
+      p.setOpen(!p.open);
+      if (p.open) p.r.q.focus({ preventScroll: true });
+    });
+    bindHover(t);
+    return t;
+  }
+
+  function updateTile(t, c, ses, multi) {
+    var r = t.r;
+    t.card = c;
+    setText(r.badge, c.label || '?');
+    setText(r.src, multi ? (ses.source || ses.id) : '');
+    cls(t.el, 'hl', !!ses.highlight && ses.highlight === c.label);
+    var title = c.name || (c.state === 'failed' ? 'Nicht erkannt' :
+      (c.state === 'new' || c.state === 'identifying') ? 'Wird erkannt …' : 'Unbekannte Karte');
+    setText(r.name, title);
+    setText(r.meta, metaLine(c));
+    setImg(r.image, c.image);
+
+    if (t.mode === 'confirm') {
+      setImg(r.crop, c.crop);
+      setText(r.sim, pct(c.similarity));
+      setText(r.reason, c.reason ? 'Grund: ' + c.reason : '');
+      var noKey = !c.key;
+      show(r.yes, !noKey);
+      show(r.hint, noKey);
+      if (noKey && !t.autoOpened) { t.autoOpened = true; getPicker(t.key).setOpen(true); }
+    } else {
+      var pr = c.price;
+      if (pr && typeof pr.value === 'number') {
+        setText(r.price, money(pr.value, pr.currency));
+        cls(r.price, 'none', false);
+        r.price.title = [pr.variant, pr.updated ? 'Stand ' + new Date(pr.updated).toLocaleString('de-DE') : '']
+          .filter(Boolean).join(' · ');
+        var ch = pr.change_30d;
+        if (typeof ch === 'number' && isFinite(ch)) {
+          var up = ch > 0.05, down = ch < -0.05;
+          setText(r.chg, (up ? '▲ +' : down ? '▼ ' : '● ') + pctFmt.format(ch) + ' %');
+          r.chg.className = 'chg ' + (up ? 'up' : down ? 'down' : 'flat');
+        } else setText(r.chg, '');
+      } else {
+        setText(r.price, c.key ? 'kein Preis' : '');
+        cls(r.price, 'none', true);
+        r.price.title = '';
+        setText(r.chg, '');
+      }
+      var tag = null, tcls = '';
+      if (c.confirmed || c.method === 'bestätigt') { tag = 'bestätigt'; tcls = 'confirmed'; }
+      else if (c.method === 'gelernt') { tag = 'gelernt'; tcls = 'learned'; }
+      else if (c.state === 'uncertain') { tag = 'unsicher'; tcls = 'unsure'; }
+      else if (c.state === 'failed') { tag = 'fehlgeschlagen'; tcls = 'failed'; }
+      show(r.tag, !!tag);
+      if (tag) { setText(r.tag, tag); r.tag.className = 'tag ' + tcls; }
+      var url = c.cardmarket_url || '';
+      show(r.cm, !!url);
+      if (url && r.cm.getAttribute('href') !== url) r.cm.setAttribute('href', url);
+      r.refresh.title = 'Aktualisieren (neu erkennen, Preis neu laden)';
+    }
+    getPicker(t.key).update(t);
+  }
+
+  function place(grid, nodes) {
+    var ref = grid.firstElementChild;
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+      if (n === ref) { ref = ref.nextElementSibling; continue; }
+      grid.insertBefore(n, ref);
+    }
+    while (ref) { var nx = ref.nextElementSibling; grid.removeChild(ref); ref = nx; }
+  }
+
+  function isUnsure(c) {
+    return !!c.needs_confirmation || c.state === 'uncertain' || c.state === 'failed';
+  }
+
+  var srcSig = null;
+  function render() {
+    var s = state || {};
+    var sessions = Array.isArray(s.sessions) ? s.sessions : [];
+    show(ui.offline, false);
+    cls(ui.main, 'stale', false);
+
+    // Kopf
+    ui.dot.className = 'dot ok';
+    setText(ui.status, (s.status || 'verbunden') + (s.engine ? ' · Engine ' + s.engine : ''));
+    var L = s.learned;
+    if (L && typeof L.references === 'number') {
+      show(ui.learned, true);
+      ui.learned.innerHTML = '';
+      ui.learned.appendChild(el('b', null, String(L.references)));
+      ui.learned.appendChild(document.createTextNode(L.references === 1 ? ' Referenz gelernt' : ' Referenzen gelernt'));
+      ui.learned.title = 'Gelernte Referenzen: ' + L.references +
+        (typeof L.negatives === 'number' ? ' · Negativbeispiele: ' + L.negatives : '') +
+        (typeof L.dataset === 'number' ? ' · Trainingsbeispiele: ' + L.dataset : '');
+    } else show(ui.learned, false);
+
+    // Quellen-Auswahl
+    var sig = sessions.map(function (x) { return x.id + '\u0001' + (x.source || ''); }).join('\u0002');
+    if (sig !== srcSig) {
+      srcSig = sig;
+      ui.src.textContent = '';
+      var all = el('option', null, 'Alle Quellen'); all.value = '*'; ui.src.appendChild(all);
+      sessions.forEach(function (x) { var o = el('option', null, x.source || x.id); o.value = x.id; ui.src.appendChild(o); });
+      var known = selSession === '*' || sessions.some(function (x) { return x.id === selSession; });
+      ui.src.value = known ? selSession : '*';
+    }
+    show(ui.srcWrap, sessions.length > 1);
+    var active = sessions;
+    if (sessions.length > 1 && selSession !== '*') {
+      var f = sessions.filter(function (x) { return x.id === selSession; });
+      if (f.length) active = f;
+    }
+    var multi = active.length > 1;
+
+    var present = new Set(), confirmNodes = [], seenNodes = [];
+    active.forEach(function (ses) {
+      var cards = (Array.isArray(ses.cards) ? ses.cards : []).filter(function (c) { return c && c.state !== 'rejected'; });
+      cards.sort(function (a, b) { return labelCmp(a.label, b.label); });
+      cards.forEach(function (c) {
+        var key = ses.id + '|' + c.track;
+        var mode = c.needs_confirmation ? 'confirm' : 'compact';
+        present.add(key);
+        var t = tiles.get(key);
+        if (t && t.mode !== mode) {
+          if (t.el.parentNode) t.el.parentNode.removeChild(t.el);
+          t = null;
+          tiles.delete(key);
+          if (mode === 'compact') getPicker(key).setOpen(false);
+        }
+        if (!t) { t = makeTile(key, ses.id, c.track, mode); tiles.set(key, t); }
+        updateTile(t, c, ses, multi);
+        if (mode === 'confirm') confirmNodes.push(t.el);
+        else if (!onlyUnsure || isUnsure(c)) seenNodes.push(t.el);
+      });
+    });
+
+    // Verschwundene Karten aufräumen (gefilterte bleiben im Speicher erhalten).
+    tiles.forEach(function (t, key) {
+      if (present.has(key)) return;
+      if (hover && hover.key === key) hlStop();
+      if (t.el.parentNode) t.el.parentNode.removeChild(t.el);
+      tiles.delete(key);
+      pickers.delete(key);
+    });
+
+    place(ui.gridConfirm, confirmNodes);
+    place(ui.gridSeen, seenNodes);
+    show(ui.secConfirm, confirmNodes.length > 0);
+    setText(ui.cntConfirm, confirmNodes.length);
+    setText(ui.cntSeen, seenNodes.length);
+    show(ui.emptySeen, seenNodes.length === 0 && confirmNodes.length === 0);
+    show(ui.secSeen, seenNodes.length > 0 || confirmNodes.length === 0);
+    setText(ui.emptySeen, onlyUnsure && present.size > 0 ? 'Keine unsicheren Karten.' :
+      sessions.length === 0 ? 'Keine Quelle aktiv – Filter „TCG Card Lens“ in OBS hinzufügen.' : 'Keine Karten im Bild.');
+  }
+
+  window.addEventListener('beforeunload', function () { if (hover) hlStop(); });
+  poll();
+})();
+</script>
+</body>
+</html>

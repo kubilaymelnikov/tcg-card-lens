@@ -33,7 +33,11 @@ class EmbeddingIndex:
     def save(self, name: str) -> None:
         path = index_path(name)
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        np.savez(path, keys=np.array(self.keys), vectors=self.vectors)
+        # Atomar: erst Temp-Datei, dann ersetzen – ein Abbruch oder ein zweiter Prozess hinterlässt nie eine halbe Datei
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "wb") as f:
+            np.savez(f, keys=np.array(self.keys), vectors=self.vectors)
+        os.replace(tmp, path)
 
     def search(self, query: np.ndarray, k: int = 10, game: str | None = None) -> list[tuple[str, float]]:
         sims = self.vectors @ query.astype(np.float16)

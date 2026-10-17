@@ -14,7 +14,7 @@
 struct PanelRef {
 	std::string key;
 	uint32_t ver = 0;
-	std::string anchor; // "top" | "bottom" | "screen"
+	std::string anchor; // "top" | "bottom" | "corner" | "screen"
 	int w = 0, h = 0;
 };
 
@@ -23,6 +23,8 @@ struct TrackResult {
 	std::array<float, 8> corners{}; // x0,y0 … x3,y3 in Analyse-Koordinaten
 	std::array<float, 3> color{1.f, 1.f, 1.f};
 	float thickness = 3.f;
+	std::string label;      // Kennzeichen (optional; ältere Engine: leer)
+	bool highlight = false; // Rahmen pulsierend mit Außenschein (optional)
 	std::vector<PanelRef> panels;
 };
 

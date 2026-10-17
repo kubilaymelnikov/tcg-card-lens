@@ -141,6 +141,9 @@ class CardPipeline:
         # Stellen, an denen nachweislich keine Karte liegt (Spielmatte, Monitor …): (Ecken, Signatur, Zeit)
         self.rejected_zones: list[tuple[np.ndarray, np.ndarray, float]] = []
         self._scene_still_since: float | None = None
+        # Eingriffe von außen (Dock): werden im Verarbeitungs-Thread am Anfang von process() ausgeführt
+        self._commands: list = []
+        self._cmd_lock = threading.Lock()
         self.tracker = CardTracker(tracker_config)
         self.detect_interval = 1.0 / detect_hz
         self.stats = PipelineStats()
@@ -175,6 +178,7 @@ class CardPipeline:
     def process(self, frame: np.ndarray, now: float | None = None) -> list[Track]:
         now = time.perf_counter() if now is None else now
         self.stats.frames += 1
+        self._run_commands(frame, now)
         tracks = self.tracker.step(frame, now)
 
         res = self._det_worker.take_result()
@@ -219,6 +223,8 @@ class CardPipeline:
                             t.state = "rejected"
                             self.rejected_zones.append((t.corners.copy(), _signature(frame, t.corners), now))
                             self.events.append(("keine-karte", t.id))
+                    elif t.confirmed:
+                        pass  # vom Nutzer bestätigt: neue Ergebnisse nicht übernehmen
                     elif identity is not None and _better(identity, old):
                         t.identity = identity
                         t.state = "identified" if identity.certain else "uncertain"
@@ -306,6 +312,57 @@ class CardPipeline:
             if sim < SWAP_THRESHOLD:
                 self.events.append(("tausch", t.id))
                 t.identity, t.signature, t.state, t.attempts, t.next_attempt = None, None, "new", 0, 0.0
+                t.confirmed = False
+
+    # ---------- Eingriffe aus dem Dock ----------
+    def post(self, fn) -> None:
+        """`fn(frame, now)` beim nächsten Frame im Verarbeitungs-Thread ausführen (kein Wettlauf mit dem Tracking)."""
+        with self._cmd_lock:
+            self._commands.append(fn)
+
+    def _run_commands(self, frame: np.ndarray, now: float) -> None:
+        with self._cmd_lock:
+            cmds, self._commands = self._commands, []
+        for fn in cmds:
+            try:
+                fn(frame, now)
+            except Exception as err:
+                print(f"[pipeline] Dock-Befehl fehlgeschlagen: {err}")
+
+    def _track(self, track_id: int) -> Track | None:
+        return next((t for t in self.tracker.tracks if t.id == track_id), None)
+
+    def confirm(self, track_id: int, identity) -> None:
+        """Vom Nutzer bestätigte Identität festsetzen (sicher, mit Preis)."""
+        def run(frame, now):
+            t = self._track(track_id)
+            if t is None:
+                return
+            t.identity, t.state, t.confirmed = identity, "identified", True
+            t.signature = _signature(frame, t.corners)
+            self.events.append(("bestätigt", t.id))
+        self.post(run)
+
+    def reject(self, track_id: int) -> None:
+        """„Keine Karte“: Track verwerfen und die Stelle als Hintergrund merken."""
+        def run(frame, now):
+            t = self._track(track_id)
+            if t is None:
+                return
+            t.identity, t.signature, t.state, t.confirmed = None, None, "rejected", False
+            self.rejected_zones.append((t.corners.copy(), _signature(frame, t.corners), now))
+            self.events.append(("keine-karte", t.id))
+        self.post(run)
+
+    def refresh(self, track_id: int) -> None:
+        """Karte neu erkennen (und damit den Preis neu laden)."""
+        def run(frame, now):
+            t = self._track(track_id)
+            if t is None:
+                return
+            t.identity, t.signature, t.state, t.confirmed = None, None, "new", False
+            t.attempts, t.next_attempt = 0, 0.0
+        self.post(run)
 
     def close(self):
         self._det_worker.close()

@@ -32,6 +32,8 @@ private:
 		std::array<float, 8> display{};
 		std::array<float, 3> color{};
 		float thickness = 3.f;
+		std::string label;
+		bool highlight = false;
 		std::vector<PanelRef> panels;
 		bool fresh = true;
 	};
@@ -40,7 +42,8 @@ private:
 		uint32_t ver = 0;
 		int w = 0, h = 0;
 	};
-	void draw_quad_outline(const std::array<float, 8> &q, float thickness, const std::array<float, 3> &rgb);
+	void draw_quad_outline(const std::array<float, 8> &q, float thickness, const std::array<float, 3> &rgb,
+			       float alpha = 1.f);
 	void draw_texture(const Tex &t, float x, float y, float scale);
 
 	std::map<int, Shown> tracks_;

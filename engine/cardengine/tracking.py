@@ -58,7 +58,8 @@ class Track:
     points: np.ndarray | None = None  # Merkmalspunkte für den optischen Fluss (verkleinerte Koordinaten)
     # Identifikation (wird von card-recognition gesetzt und am Track gecacht)
     identity: object | None = None
-    state: str = "new"  # new | identifying | identified | uncertain | failed
+    state: str = "new"  # new | identifying | identified | uncertain | failed | rejected
+    confirmed: bool = False  # Identität vom Nutzer bestätigt (Dock) – wird nicht mehr überschrieben
     attempts: int = 0
     next_attempt: float = 0.0
     signature: np.ndarray | None = None  # kleines Graubild der Karte zur Änderungserkennung (Tisch-Modus)
