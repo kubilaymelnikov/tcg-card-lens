@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <title>TCG Card Lens – OBS Overlay</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+    canvas { position: absolute; inset: 0; }
+    #status {
+      position: absolute; left: 12px; bottom: 12px; padding: 8px 12px; border-radius: 8px;
+      font: 600 14px system-ui, sans-serif; color: #fff; background: rgba(15, 18, 28, 0.85);
+      border-left: 3px solid #7dd3fc; max-width: 70%;
+    }
+    #status.error { border-left-color: #f87171; }
+    #status:empty { display: none; }
+  </style>
+</head>
+<body>
+  <canvas id="overlay"></canvas>
+  <div id="status">Starte …</div>
+  <script type="module" src="/js/overlay.js"></script>
+</body>
+</html>

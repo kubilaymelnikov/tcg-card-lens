@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TCG Card Lens</title>
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <header>
+    <h1>TCG Card Lens</h1>
+    <div class="controls">
+      <select id="camera" aria-label="Kamera"></select>
+      <select id="game" aria-label="Spiel">
+        <option value="auto">Magic + Pokémon</option>
+        <option value="mtg">nur Magic</option>
+        <option value="pokemon">nur Pokémon</option>
+      </select>
+      <label class="toggle"><input type="checkbox" id="debug" /> Debug</label>
+      <button id="obsBtn" type="button">In OBS nutzen</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="stage" id="stage">
+      <video id="video" playsinline muted></video>
+      <canvas id="overlay"></canvas>
+      <div class="hint" id="hint">Kamera wird gestartet …</div>
+      <div class="diag" id="diag"></div>
+    </section>
+
+    <aside>
+      <h2>Erkannte Karten</h2>
+      <ul id="cards" class="cards"><li class="empty">Halte eine Karte vor die Kamera – gut ausgeleuchtet, Kartenrand sichtbar, möglichst vor ruhigem Hintergrund.</li></ul>
+
+      <h2>Manuell suchen</h2>
+      <form id="searchForm" class="search">
+        <input id="q" placeholder="Kartenname, z. B. Glurak-ex" autocomplete="off" />
+      </form>
+      <ul id="results" class="results"></ul>
+
+      <h2>Kamera</h2>
+      <div class="camtools">
+        <label id="focusBox" hidden>Fokus <input id="focus" type="range" /></label>
+        <button id="snapBtn" type="button" class="secondary">Bild für Diagnose speichern</button>
+        <div id="snapMsg" class="meta"></div>
+      </div>
+
+      <details id="debugBox">
+        <summary>Letzte Texterkennung</summary>
+        <div class="debug"><canvas id="debugCard"></canvas><pre id="debugText"></pre></div>
+      </details>
+    </aside>
+  </main>
+
+  <dialog id="obsDialog">
+    <form method="dialog">
+      <h2>Als Overlay in OBS nutzen</h2>
+      <ol>
+        <li>In OBS: <b>Werkzeuge → WebSocket-Server-Einstellungen</b> → Server aktivieren, Port und Passwort notieren.</li>
+        <li>Name der Quelle eintragen, auf die das Overlay soll (z. B. deine Webcam).</li>
+        <li>URL kopieren, in OBS eine <b>Browser</b>-Quelle anlegen und die URL einfügen. Breite/Höhe = Auflösung der Quelle.</li>
+        <li>Browserquelle <b>über</b> die Kamera-Quelle legen und gleich groß ausrichten (am einfachsten beide in eine Gruppe).</li>
+      </ol>
+      <div class="grid">
+        <label>Quellenname <input id="oSource" placeholder="Webcam" /></label>
+        <label>Host <input id="oHost" value="localhost" /></label>
+        <label>Port <input id="oPort" value="4455" /></label>
+        <label>Passwort <input id="oPassword" type="password" /></label>
+        <label>Bilder/s <input id="oFps" type="number" min="1" max="15" value="5" /></label>
+        <label class="toggle"><input id="oDebug" type="checkbox" /> Erkennung sichtbar machen</label>
+      </div>
+      <output id="oUrl"></output>
+      <div class="actions">
+        <button type="button" id="oCopy">URL kopieren</button>
+        <button value="close">Schließen</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

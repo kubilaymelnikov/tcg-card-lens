@@ -1,0 +1,9 @@
+[project]
+name = "cardengine"
+version = "0.1.0"
+description = "Erkennung, Tracking und Identifikation von Pokémon- und Magic-Karten (Prototyp für ein OBS-Plugin)"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

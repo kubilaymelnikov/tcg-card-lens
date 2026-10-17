@@ -1,0 +1,22 @@
+# Web-Prototyp
+node_modules/
+/data/
+
+# Engine: Laufzeitdaten, Modelle, Python-Umgebung (werden lokal erzeugt / geladen)
+engine/.venv/
+engine/data/
+engine/models/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# OBS-Plugin: Abhängigkeiten und Build
+obs-plugin/.deps/
+obs-plugin/build_*/
+obs-plugin/*.log
+
+# Installer-Ausgabe
+installer/Output/
+
+# Editor/Tools
+.claude/

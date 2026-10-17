@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <title>TCG Card Lens – Testszene</title>
+  <style>
+    body { margin: 0; background: #000; color: #ddd; font: 13px system-ui, sans-serif; }
+    #wrap { position: relative; width: 100vw; aspect-ratio: 16 / 9; max-height: 100vh; }
+    #wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+    #log { position: fixed; right: 8px; bottom: 8px; background: rgba(0,0,0,.7); padding: 8px; white-space: pre; max-width: 50vw; }
+  </style>
+</head>
+<body>
+  <div id="wrap"><canvas id="scene"></canvas><canvas id="overlay"></canvas></div>
+  <div id="log">lade …</div>
+  <script type="module">
+    // Synthetische Szene: echte Kartenbilder, gedreht auf strukturiertem Hintergrund.
+    import { loadOpenCv } from '/js/detector.js';
+    import { CardReader } from '/js/reader.js';
+    import { CardLens } from '/js/lens.js';
+    import { OverlayRenderer, fitTransform } from '/js/render.js';
+    import { loadImage } from '/js/overlay-utils.js';
+
+    const log = (t) => (document.getElementById('log').textContent = t);
+    addEventListener('error', (e) => log('Fehler: ' + e.message));
+    addEventListener('unhandledrejection', (e) => log('Fehler: ' + (e.reason?.message || e.reason)));
+    log('lade Karten …');
+    const W = 1920, H = 1080;
+    const scene = document.getElementById('scene');
+    scene.width = W; scene.height = H;
+    const ctx = scene.getContext('2d', { willReadFrequently: true });
+
+    const specs = [
+      { game: 'mtg', key: 'Lightning Bolt', x: 380, y: 520, rot: -0.12 },
+      { game: 'pokemon', key: 'en|Mew ex', number: '151', total: '165', x: 960, y: 540, rot: 0.08 },
+      { game: 'pokemon', key: 'de|Glurak-ex', number: '199', total: '165', x: 1540, y: 520, rot: 3.1 },
+    ];
+    const cards = await Promise.all(specs.map(async (s) => {
+      const card = await fetch('/api/resolve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(s) }).then((r) => r.json());
+      const img = await loadImage(`/api/image?url=${encodeURIComponent(card.image)}`);
+      return { ...s, img, expected: card.name, expectedId: card.id };
+    }));
+
+    log('Karten geladen, starte Erkennung …');
+    function paint(t) {
+      const g = ctx.createLinearGradient(0, 0, W, H);
+      g.addColorStop(0, '#3a2a1c'); g.addColorStop(1, '#5a4030');
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = 0.08;
+      for (let i = 0; i < 60; i++) { ctx.fillStyle = i % 2 ? '#000' : '#fff'; ctx.fillRect(0, i * 18, W, 4); }
+      ctx.globalAlpha = 1;
+      for (const c of cards) {
+        const h = 470, w = h * 63 / 88;
+        ctx.save();
+        ctx.translate(c.x + Math.sin(t / 900 + c.x) * 12, c.y);
+        ctx.rotate(c.rot);
+        ctx.shadowColor = 'rgba(0,0,0,.6)'; ctx.shadowBlur = 20;
+        ctx.drawImage(c.img, -w / 2, -h / 2, w, h);
+        ctx.restore();
+      }
+    }
+
+    const reader = new CardReader();
+    const [{ cv }] = await Promise.all([loadOpenCv(), reader.init()]);
+    log('Erkennung bereit');
+    const lens = new CardLens(cv, reader);
+    const renderer = new OverlayRenderer(document.getElementById('overlay'), { showPending: true });
+    const wrap = document.getElementById('wrap');
+    const resize = () => { renderer.resize(wrap.clientWidth, wrap.clientHeight); renderer.scale = wrap.clientHeight / 1080 * 1.4; };
+    resize(); addEventListener('resize', resize);
+
+    window.__lens = lens;
+    let state;
+    setInterval(() => {
+      paint(performance.now());
+      state = lens.process(scene, W, H);
+      const ok = (t) => t.card && t.card.printCertain && cards.some((c) => c.expectedId === t.card.id);
+      const lines = state.tracks.map((t) => `#${t.id} ${t.state} ${t.card ? `${t.card.name} ${t.card.setCode} ${t.card.number} ${t.card.printCertain ? 'sicher' : 'geschätzt'}${ok(t) ? ' ✓' : ''} – ${t.card.prices.trend ?? t.card.prices.foilTrend} € (${t.card.history.length} Verlaufspunkte)` : ''}`);
+      window.__printsOk = cards.filter((c) => state.tracks.some((t) => ok(t) && t.card.id === c.expectedId)).length;
+      log(`erwartet: ${cards.map((c) => `${c.expected} (${c.expectedId})`).join(', ')}\nDruck korrekt: ${window.__printsOk}/${cards.length}\nerkannt: ${state.detections.length}\n${lines.join('\n')}`);
+    }, 150);
+    (function frame() {
+      if (state) renderer.draw(state, fitTransform(W, H, renderer.w, renderer.h, 'fill'), performance.now(), state.detections);
+      requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>
