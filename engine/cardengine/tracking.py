@@ -84,12 +84,14 @@ class CardTracker:
         self._prev_gray: np.ndarray | None = None
         self._prev_motion: np.ndarray | None = None
         self.global_motion = 0.0  # mittlere Bildänderung des ganzen Bildes (für adaptive Detektionsrate)
+        self._now = 0.0
 
     # ---------- jeder Frame ----------
     def step(self, frame: np.ndarray, now: float) -> list[Track]:
         """Ecken aller Tracks per optischem Fluss nachführen und abgelaufene Tracks entfernen."""
         s = self.cfg.flow_scale
         gray = cv2.cvtColor(cv2.resize(frame, None, fx=s, fy=s, interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY)
+        self._now = now
         self._update_motion(gray, frame.shape[1])
         if self._prev_gray is not None and self._prev_gray.shape == gray.shape:
             for t in self.tracks:
@@ -133,6 +135,11 @@ class CardTracker:
             t.motion = float(region.mean()) if region.size else 0.0
             if t.motion < cfg.motion_still:
                 t.still_frames += 1
+                if t.locked:
+                    # Fixierte Karte, Bildbereich unverändert → sie liegt noch da, auch wenn der (bei ruhigem
+                    # Bild seltene) Detektor gerade nichts meldet. Ohne das verfiel sie nach der Haltezeit und
+                    # wurde neu erkannt ("Zurücksetzen").
+                    t.last_confirmed = max(t.last_confirmed, self._now)
                 if not t.locked and t.still_frames >= cfg.lock_after_frames:
                     t.locked, t.samples, t.outliers = True, [t.corners.copy()], 0
             else:

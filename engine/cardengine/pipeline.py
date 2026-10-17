@@ -258,7 +258,8 @@ class CardPipeline:
         self.stats.locked_tracks = sum(t.locked for t in tracks)
         still = self._scene_still_since is not None and now - self._scene_still_since >= SCENE_STILL_S
         if still and all(t.finalized or t.state == "rejected" for t in tracks):
-            return max(self.detect_interval, 1.0 / IDLE_DETECT_HZ)
+            # Nie seltener als zweimal pro Haltezeit – sonst verfallen Karten, die nicht fixiert sind
+            return max(self.detect_interval, min(1.0 / IDLE_DETECT_HZ, self.tracker.cfg.lost_after_s / 2))
         return self.detect_interval
 
     def _refine_edges(self, frame: np.ndarray, tracks: list[Track]) -> None:
