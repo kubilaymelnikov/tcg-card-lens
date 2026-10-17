@@ -414,6 +414,10 @@ class Session:
                 "highlight": highlighted,
                 "panels": panels,
             })
+        # Nicht gesendete Karten gibt das Plugin samt Texturen frei → beim nächsten Auftauchen Panels neu senden
+        sent = {str(o["id"]) for o in out}
+        for key in [k for k in self.sent_versions if ":" in k and k.split(":", 1)[0] not in sent]:
+            del self.sent_versions[key]
         res = {"type": "result", "seq": seq, "tracks": out, "status": self.shared.status}
         if st["debug"]:
             s = self.pipeline.stats
