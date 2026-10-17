@@ -189,3 +189,33 @@ def test_tracker_locks_static_card_and_unlocks_on_motion():
     moved = scene_with_card(QUAD + np.float32([60, 0]))
     tr.step(moved, t + 1 / 30)
     assert not track.locked  # Bewegung löst den Lock
+
+
+def test_locked_card_survives_detection_gaps_on_still_image():
+    # Ruhiges Bild, aber 3 s ohne Detektion (z. B. Detektor bei 1 Hz und ein Aussetzer) bei 1,2 s Haltezeit:
+    # die fixierte Karte darf nicht verfallen und neu erkannt werden.
+    cfg = TrackerConfig.table()
+    cfg.lost_after_s = 1.2
+    tr = CardTracker(cfg)
+    img = scene_with_card(QUAD)
+    t = 0.0
+    for i in range(30):
+        t += 1 / 30
+        tr.step(img, t)
+        if i % 3 == 0:
+            tr.update([Detection(order_corners(QUAD), 0.9)], t)
+    track = tr.tracks[0]
+    assert track.locked
+    for _ in range(90):  # 3 s ohne Detektion
+        t += 1 / 30
+        tracks = tr.step(img, t)
+    assert tracks and tracks[0].id == track.id
+
+
+def test_unlocked_card_still_expires_without_detections():
+    cfg = TrackerConfig.facecam()
+    cfg.lost_after_s = 1.0
+    tr = CardTracker(cfg)
+    tr.update([Detection(order_corners(QUAD), 0.9)], 0.0)
+    blank = np.full((720, 1280, 3), (60, 90, 120), np.uint8)  # Karte weg
+    assert not tr.step(blank, 1.5)

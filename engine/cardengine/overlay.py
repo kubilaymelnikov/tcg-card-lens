@@ -50,6 +50,7 @@ class OverlayRenderer:
         self.frame_thickness = frame_thickness
         self.show_pending = show_pending
         self._cache: dict[int, tuple[tuple, np.ndarray]] = {}  # track_id -> (Schlüssel, RGBA)
+        self._badges: dict[tuple, tuple[int, np.ndarray]] = {}
 
     # ---------- Panels ----------
     def _panel_key(self, t: Track, width: int):
@@ -139,6 +140,21 @@ class OverlayRenderer:
         return img
 
     # ---------- Export für das OBS-Plugin ----------
+    def label_badge(self, label: str, color: tuple[int, int, int], card_w: float) -> tuple[int, np.ndarray]:
+        """Rundes Kennzeichen-Badge (A, B …) für die Ecke oben links; (Version, RGBA)."""
+        size = int(np.clip(round(card_w * 0.13 * self.scale / 4) * 4, 20, 56))
+        key = (label, tuple(color), size)
+        cached = self._badges.get(key)
+        if cached is None:
+            img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+            d = ImageDraw.Draw(img)
+            d.ellipse((1, 1, size - 2, size - 2), fill=(*color, 240), outline=(15, 17, 22, 255), width=max(2, size // 12))
+            font = _font(int(size * (0.58 if len(label) == 1 else 0.44)), bold=True)
+            d.text((size / 2, size / 2), label, font=font, fill=(15, 17, 22, 255), anchor="mm")
+            cached = (hash(key) & 0x7FFFFFFF, np.array(img))
+            self._badges[key] = cached
+        return cached
+
     def track_color(self, t: Track) -> tuple[int, int, int]:
         ident = t.identity
         if ident is None:

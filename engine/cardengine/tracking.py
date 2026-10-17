@@ -31,6 +31,9 @@ class TrackerConfig:
     lock_after_frames: int = 8  # so viele ruhige Frames in Folge -> Lock
     lock_tolerance: float = 0.06  # Detektionen mit < 6 % Abweichung (Kartenbreite) bestätigen den Lock
     refine_samples: int = 20  # so viele bestätigende Detektionen werden gemittelt, dann steht die Position
+    # Wiederaufnahme: Eine kurz verlorene Karte (z. B. beim Verschieben) behält Nummer und Erkennung
+    revive_s: float = 4.0  # so lange werden verlorene Tracks gemerkt
+    revive_iou: float = 0.3  # neue Detektion mit dieser Überlappung zum letzten Ort → derselbe Track
 
     @classmethod
     def facecam(cls) -> "TrackerConfig":
@@ -58,7 +61,14 @@ class Track:
     points: np.ndarray | None = None  # Merkmalspunkte für den optischen Fluss (verkleinerte Koordinaten)
     # Identifikation (wird von card-recognition gesetzt und am Track gecacht)
     identity: object | None = None
-    state: str = "new"  # new | identifying | identified | uncertain | failed
+    state: str = "new"  # new | identifying | identified | uncertain | failed | rejected
+    confirmed: bool = False  # Identität vom Nutzer bestätigt (Dock) – wird nicht mehr überschrieben
+    user_rejected: bool = False  # vom Nutzer als „keine Karte“ markiert (Dock)
+    hidden: bool = False  # im Dock ohne Angabe von Gründen entfernt: nicht anzeigen, nichts lernen
+    orientation_fixed: bool = False  # Nutzer hat die Karte im Dock gedreht: keine automatische 90°-Korrektur
+    user_turns: int = 0  # Vierteldrehungen durch den Nutzer (Diagnose / Lernen)
+    orient_rev: int = 0  # zählt jede Änderung der Eckenzuordnung (Dock lädt dann das Kamerabild neu)
+    swap_hits: int = 0  # Swap-Prüfungen in Folge mit deutlich anderem Inhalt
     attempts: int = 0
     next_attempt: float = 0.0
     signature: np.ndarray | None = None  # kleines Graubild der Karte zur Änderungserkennung (Tisch-Modus)
@@ -84,19 +94,27 @@ class CardTracker:
         self._prev_gray: np.ndarray | None = None
         self._prev_motion: np.ndarray | None = None
         self.global_motion = 0.0  # mittlere Bildänderung des ganzen Bildes (für adaptive Detektionsrate)
+        self._now = 0.0
+        self._lost: list[tuple[Track, float]] = []  # (Track, verloren seit) – für die Wiederaufnahme
 
     # ---------- jeder Frame ----------
     def step(self, frame: np.ndarray, now: float) -> list[Track]:
         """Ecken aller Tracks per optischem Fluss nachführen und abgelaufene Tracks entfernen."""
         s = self.cfg.flow_scale
         gray = cv2.cvtColor(cv2.resize(frame, None, fx=s, fy=s, interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY)
+        self._now = now
         self._update_motion(gray, frame.shape[1])
         if self._prev_gray is not None and self._prev_gray.shape == gray.shape:
             for t in self.tracks:
                 if not t.locked:  # eingefrorene Karten nicht per optischem Fluss verschieben (kein Driften)
                     self._flow(t, self._prev_gray, gray)
         self._prev_gray = gray
-        self.tracks = [t for t in self.tracks if now - t.last_confirmed <= self.cfg.lost_after_s]
+        kept, lost = [], []
+        for t in self.tracks:
+            (kept if now - t.last_confirmed <= self.cfg.lost_after_s else lost).append(t)
+        self.tracks = kept
+        self._lost = [(t, ts) for t, ts in self._lost if now - ts <= self.cfg.revive_s]
+        self._lost += [(t, now) for t in lost if t.identity is not None or t.hits >= 3]
         for t in self.tracks:
             if t.locked:
                 # Ruhende Karte: sanft auf die (fertig gemittelte, feinjustierte) Position gleiten und dort
@@ -133,6 +151,11 @@ class CardTracker:
             t.motion = float(region.mean()) if region.size else 0.0
             if t.motion < cfg.motion_still:
                 t.still_frames += 1
+                if t.locked:
+                    # Fixierte Karte, Bildbereich unverändert → sie liegt noch da, auch wenn der (bei ruhigem
+                    # Bild seltene) Detektor gerade nichts meldet. Ohne das verfiel sie nach der Haltezeit und
+                    # wurde neu erkannt ("Zurücksetzen").
+                    t.last_confirmed = max(t.last_confirmed, self._now)
                 if not t.locked and t.still_frames >= cfg.lock_after_frames:
                     t.locked, t.samples, t.outliers = True, [t.corners.copy()], 0
             else:
@@ -145,7 +168,9 @@ class CardTracker:
     def _unlock(t: Track) -> None:
         t.locked = t.finalized = t.edge_refined = False
         t.samples, t.outliers, t.points = [], 0, None
-        if t.state == "rejected":  # an dieser Stelle hat sich etwas bewegt -> erneut prüfen
+        if t.state == "rejected" and t.user_rejected:
+            pass  # vom Nutzer verworfen: bleibt verworfen; ein echter Kartentausch wird über die Signatur erkannt
+        elif t.state == "rejected":  # an dieser Stelle hat sich etwas bewegt -> erneut prüfen
             t.state, t.attempts, t.next_attempt = "new", 0, 0.0
         elif t.state in ("uncertain", "failed"):  # neue Perspektive -> wieder Versuche erlauben
             t.attempts, t.next_attempt = 0, 0.0
@@ -202,8 +227,32 @@ class CardTracker:
         for di, d in enumerate(detections):
             if di not in used_d:
                 c = d.corners.astype(np.float32)
+                old = self._revive(c, now)
+                if old is not None:
+                    old.corners = _align(c, old.corners).astype(np.float32)
+                    old.last_confirmed, old.score, old.game = now, d.score, d.game or old.game
+                    old.hits += 1
+                    self.tracks.append(old)
+                    continue
                 self.tracks.append(Track(corners=c, display=c.copy(), score=d.score, game=d.game, first_seen=now, last_confirmed=now))
         return self.tracks
+
+    def _revive(self, corners: np.ndarray, now: float) -> Track | None:
+        """Kürzlich verlorenen Track an (fast) gleicher Stelle zurückholen – gleiche ID, gleiche Erkennung.
+        Ob dort inzwischen eine andere Karte liegt, prüft die Tausch-Erkennung der Pipeline."""
+        best, best_iou = None, self.cfg.revive_iou
+        for i, (t, ts) in enumerate(self._lost):
+            if now - ts > self.cfg.revive_s:
+                continue
+            iou = iou_quads(t.corners, corners)
+            if iou >= best_iou:
+                best, best_iou = i, iou
+        if best is None:
+            return None
+        t, _ = self._lost.pop(best)
+        self._unlock(t)  # Karte wurde bewegt: Position neu einmessen
+        t.still_frames = 0
+        return t
 
 
     def _confirm_locked(self, t: Track, aligned: np.ndarray) -> None:

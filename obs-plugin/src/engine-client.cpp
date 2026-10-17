@@ -415,6 +415,11 @@ void EngineClient::handle_message(const std::string &text)
 		for (int i = 0; i < 3 && i < (int)col.size(); i++)
 			tr.color[i] = col[i].get<float>() / 255.f;
 		tr.thickness = t.value("thickness", 3.f);
+		// Optional (neuere Engine): Kennzeichen und Hervorhebung; fehlend/falscher Typ → Standardwerte
+		if (t.contains("label") && t["label"].is_string())
+			tr.label = t["label"].get<std::string>();
+		if (t.contains("highlight") && t["highlight"].is_boolean())
+			tr.highlight = t["highlight"].get<bool>();
 		parse_panels(t["panels"], tr.panels, updates);
 		r.tracks.push_back(std::move(tr));
 	}

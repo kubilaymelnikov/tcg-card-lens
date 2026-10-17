@@ -53,7 +53,9 @@ DEFAULT_SETTINGS = {
     "debug": False,
     "auto_snapshots": True,
     "snapshot_limit_mb": 500,
+    "show_labels": "dock",  # Kennzeichen (A, B …) im Video: dock = nur solange das Dock offen ist | always | never
 }
+DOCK_ACTIVE_S = 5.0  # so lange nach der letzten Dock-Abfrage gilt das Dock als offen
 
 
 # ---------------------------------------------------------------- gemeinsame Modelle
@@ -66,6 +68,11 @@ class Shared:
         self._status = "Modelle werden geladen …"
         self.maintenance = None
         self.sessions = 0
+        self.session_list: list = []  # verbundene Sitzungen (für das Dock)
+        self._next_sid = 0
+        self._sid_lock = threading.Lock()
+        self.learned = None  # cardengine.learning.LearnedStore
+        self.dock_seen = 0.0  # letzte Abfrage des Docks
         self.last_activity = time.time()
         self.names = CardNames()
         self.detector = None
@@ -81,6 +88,11 @@ class Shared:
     @status.setter
     def status(self, value: str) -> None:
         self._status = value
+
+    def new_sid(self) -> str:
+        with self._sid_lock:
+            self._next_sid += 1
+            return f"s{self._next_sid}"
 
     def _swap_index(self, index) -> None:
         """Neuer Embedding-Index aus der Hintergrund-Wartung – ohne Neustart übernehmen."""
@@ -113,7 +125,16 @@ class Shared:
             # Gemeinsamer Detektor mit niedriger Schwelle; jede Sitzung filtert nach ihrer Empfindlichkeit
             det.base.conf = 0.2
             self.detector = Locked(det, self.lock)
-            self.identifier = Locked(CardIdentifier.load_default(), self.lock)
+            identifier = CardIdentifier.load_default()
+            try:
+                from cardengine.learning import LearnedStore
+
+                self.learned = LearnedStore()
+                identifier.learned = self.learned
+                print(f"[engine] gelernte Referenzen: {self.learned.counts()}", flush=True)
+            except Exception as err:
+                print(f"[engine] Lernspeicher nicht verfügbar: {err}", flush=True)
+            self.identifier = Locked(identifier, self.lock)
             self.status = "bereit"
             self.ready.set()
             print(f"[engine] Modelle geladen in {time.time() - t0:.1f} s", flush=True)
@@ -128,6 +149,16 @@ class Shared:
 
 
 # ---------------------------------------------------------------- Verbindung
+def _label_name(n: int) -> str:
+    """0 -> A, 25 -> Z, 26 -> AA …"""
+    s = ""
+    n += 1
+    while n:
+        n, r = divmod(n - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+
 def send(sock: socket.socket, msg: dict, lock: threading.Lock) -> None:
     data = json.dumps(msg, separators=(",", ":")).encode("utf-8")
     with lock:
@@ -176,6 +207,9 @@ class Session:
         self._text_cache: dict[str, tuple[float, int, int, int]] = {}
         self._text_data: dict[str, np.ndarray] = {}
         self.counts = {"empfangen": 0, "verarbeitet": 0, "gesendet": 0, "fehler": 0}
+        self.sid = shared.new_sid()
+        self.labels: dict[int, str] = {}  # Track-ID -> Kennzeichen (A, B …)
+        self.highlight: tuple[str, float] | None = None  # (Kennzeichen, gültig bis)
         self._last_count_log = time.time()
 
     # -------- Einstellungen
@@ -220,9 +254,37 @@ class Session:
         self.apply_settings(self.settings)
         return True
 
+    # -------- Kennzeichen / Hervorhebung (Dock)
+    def label_for(self, track_id: int) -> str:
+        if track_id not in self.labels:
+            used = set(self.labels.values())
+            n = 0
+            while True:
+                lab = _label_name(n)
+                if lab not in used:
+                    break
+                n += 1
+            self.labels[track_id] = lab
+        return self.labels[track_id]
+
+    def _prune_labels(self, alive: set[int]) -> None:
+        for tid in [k for k in self.labels if k not in alive]:
+            del self.labels[tid]
+
+    def current_highlight(self) -> str | None:
+        h = self.highlight
+        return h[0] if h is not None and time.time() < h[1] else None
+
+    def _labels_visible(self) -> bool:
+        mode = self.settings.get("show_labels", "dock")
+        if mode == "always":
+            return True
+        return mode == "dock" and time.time() - self.shared.dock_seen < DOCK_ACTIVE_S
+
     # -------- Schleifen
     def run(self) -> None:
         self.shared.sessions += 1
+        self.shared.session_list.append(self)
         worker = threading.Thread(target=self._process_loop, daemon=True)
         worker.start()
         try:
@@ -243,6 +305,8 @@ class Session:
                 self.shm.close()
             self.sock.close()
             self.shared.sessions -= 1
+            if self in self.shared.session_list:
+                self.shared.session_list.remove(self)
             self.shared.last_activity = time.time()
             print(f"[engine] {self.source}: getrennt")
 
@@ -316,12 +380,28 @@ class Session:
     def _result(self, seq: int, tracks, shape) -> dict:
         st = self.settings
         out = []
+        self._prune_labels({t.id for t in self.pipeline.tracker.tracks if t.state != "rejected"})
+        hl = self.current_highlight()
+        show_labels = self._labels_visible()
         for t in tracks:
-            if t.identity is None and not st["debug"]:
+            if t.hidden and not st["debug"]:
+                continue  # im Dock entfernt
+            label = self.label_for(t.id) if t.state != "rejected" else ""
+            highlighted = bool(hl) and label == hl
+            if t.identity is None and not st["debug"] and not highlighted and not (show_labels and t.state == "failed"):
                 continue
             panels = []
             for key, ver, anchor, img in self.overlay.panels(t, shape[1]):
                 p = {"key": key, "ver": ver, "anchor": anchor, "w": int(img.shape[1]), "h": int(img.shape[0])}
+                if self.sent_versions.get(key) != ver:
+                    p["data"] = base64.b64encode(np.ascontiguousarray(img).tobytes()).decode("ascii")
+                    self.sent_versions[key] = ver
+                panels.append(p)
+            if show_labels and label:
+                card_w = float(np.linalg.norm(t.display[0] - t.display[1]))
+                ver, img = self.overlay.label_badge(label, self.overlay.track_color(t), card_w)
+                key = f"{t.id}:label"
+                p = {"key": key, "ver": ver, "anchor": "corner", "w": int(img.shape[1]), "h": int(img.shape[0])}
                 if self.sent_versions.get(key) != ver:
                     p["data"] = base64.b64encode(np.ascontiguousarray(img).tobytes()).decode("ascii")
                     self.sent_versions[key] = ver
@@ -332,8 +412,14 @@ class Session:
                 "color": list(self.overlay.track_color(t)),
                 "thickness": float(st["thickness"]),
                 "state": t.state,
+                "label": label,
+                "highlight": highlighted,
                 "panels": panels,
             })
+        # Nicht gesendete Karten gibt das Plugin samt Texturen frei → beim nächsten Auftauchen Panels neu senden
+        sent = {str(o["id"]) for o in out}
+        for key in [k for k in self.sent_versions if ":" in k and k.split(":", 1)[0] not in sent]:
+            del self.sent_versions[key]
         res = {"type": "result", "seq": seq, "tracks": out, "status": self.shared.status}
         if st["debug"]:
             s = self.pipeline.stats
@@ -402,8 +488,13 @@ def main():
     ap.add_argument("--preload-languages", default="de,en")
     ap.add_argument("--idle-exit", type=float, default=0,
                     help="Engine beenden, wenn so viele Sekunden kein OBS-Filter verbunden war (0 = nie)")
+    ap.add_argument("--dock-port", type=int, default=47830, help="HTTP-Port für das OBS-Dock (0 = aus)")
     args = ap.parse_args()
     shared = Shared([l for l in args.preload_languages.split(",") if l])
+    if args.dock_port:
+        from dock_server import start_dock_server
+
+        start_dock_server(shared, args.host, args.dock_port)
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind((args.host, args.port))

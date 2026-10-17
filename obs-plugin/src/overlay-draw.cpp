@@ -2,6 +2,7 @@
 
 #include <obs-module.h>
 #include <graphics/vec4.h>
+#include <util/platform.h>
 
 #include <algorithm>
 #include <cmath>
@@ -59,6 +60,8 @@ void OverlayDrawer::set_result(const ResultFrame &r, float sx, float sy)
 		}
 		s.color = t.color;
 		s.thickness = t.thickness;
+		s.label = t.label;
+		s.highlight = t.highlight;
 		s.panels = t.panels;
 	}
 	for (auto it = tracks_.begin(); it != tracks_.end();)
@@ -90,12 +93,14 @@ void OverlayDrawer::set_result(const ResultFrame &r, float sx, float sy)
 	screen_panels_ = r.screen_panels;
 }
 
-void OverlayDrawer::draw_quad_outline(const std::array<float, 8> &q, float thickness, const std::array<float, 3> &rgb)
+void OverlayDrawer::draw_quad_outline(const std::array<float, 8> &q, float thickness, const std::array<float, 3> &rgb,
+				      float alpha)
 {
 	gs_effect_t *solid = obs_get_base_effect(OBS_EFFECT_SOLID);
 	gs_eparam_t *color = gs_effect_get_param_by_name(solid, "color");
 	struct vec4 c;
-	const uint32_t packed = 0xFF000000u | (uint32_t(rgb[2] * 255) << 16) | (uint32_t(rgb[1] * 255) << 8) |
+	const uint32_t a8 = uint32_t(std::clamp(alpha, 0.f, 1.f) * 255.f + 0.5f);
+	const uint32_t packed = (a8 << 24) | (uint32_t(rgb[2] * 255) << 16) | (uint32_t(rgb[1] * 255) << 8) |
 				uint32_t(rgb[0] * 255);
 	vec4_from_rgba_srgb(&c, packed);
 	gs_effect_set_vec4(color, &c);
@@ -173,12 +178,32 @@ void OverlayDrawer::draw(uint32_t w, uint32_t h, const OverlayStyle &style)
 		return std::pair<float, float>(x, y);
 	};
 
+	// Hervorhebung: Dickenfaktor pulsiert mit ~2 Hz zwischen 1,5 und 2,5
+	constexpr float kPi = 3.14159265f;
+	const double t_sec = double(os_gettime_ns() % 1000000000000ull) * 1e-9;
+	const float pulse = 2.f + 0.5f * float(std::sin(2.0 * kPi * 2.0 * t_sec));
+
+	// "corner"-Panels: nach allen Rahmen zeichnen, ohne Überlappungsvermeidung
+	struct CornerPanel {
+		const Tex *tex;
+		float x, y;
+	};
+	std::vector<CornerPanel> corner_panels;
+
 	for (auto &kv : tracks_) {
 		Shown &s = kv.second;
 		for (int i = 0; i < 8; i++)
 			s.display[i] += (s.target[i] - s.display[i]) * a; // Glättung bei voller Bildrate
 		const float card_w = std::hypot(s.display[2] - s.display[0], s.display[3] - s.display[1]);
-		draw_quad_outline(s.display, std::max(2.f, s.thickness * card_w / 250.f), s.color);
+		const float base = std::max(2.f, s.thickness * card_w / 250.f);
+		if (s.highlight) {
+			const float th = base * pulse;
+			// heller, halbtransparenter Außenschein unter dem Rahmen
+			draw_quad_outline(s.display, th + std::max(6.f, base * 2.f), {1.f, 1.f, 1.f}, 0.35f);
+			draw_quad_outline(s.display, th, s.color);
+		} else {
+			draw_quad_outline(s.display, base, s.color);
+		}
 		float cx = 0, top = 1e9f, bottom = -1e9f;
 		for (int i = 0; i < 4; i++) {
 			cx += s.display[i * 2] / 4.f;
@@ -190,11 +215,20 @@ void OverlayDrawer::draw(uint32_t w, uint32_t h, const OverlayStyle &style)
 			if (it == textures_.end() || !it->second.tex)
 				continue;
 			const float pw = it->second.w * panel_scale_, ph = it->second.h * panel_scale_;
+			if (p.anchor == "corner") {
+				// Mittelpunkt auf die angezeigte (geglättete) erste Ecke, auf den Bildschirm geklemmt
+				const float x = std::clamp(s.display[0] - pw / 2, 0.f, std::max(0.f, float(w) - pw));
+				const float y = std::clamp(s.display[1] - ph / 2, 0.f, std::max(0.f, float(h) - ph));
+				corner_panels.push_back({&it->second, x, y});
+				continue;
+			}
 			const bool is_top = p.anchor == "top";
 			auto pos = place(cx - pw / 2, is_top ? top - ph - 6 : bottom + 8, pw, ph, is_top ? -1 : 1);
 			draw_texture(it->second, pos.first, pos.second, panel_scale_);
 		}
 	}
+	for (const auto &cp : corner_panels)
+		draw_texture(*cp.tex, cp.x, cp.y, panel_scale_);
 	for (const auto &p : screen_panels_) {
 		auto it = textures_.find(p.key);
 		if (it != textures_.end() && it->second.tex)

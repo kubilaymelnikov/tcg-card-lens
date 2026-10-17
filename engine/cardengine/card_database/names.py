@@ -41,6 +41,9 @@ class CardNames:
         self._db.execute("CREATE TABLE IF NOT EXISTS names (id TEXT, lang TEXT, name TEXT, PRIMARY KEY (id, lang))")
         self._session = requests.Session()
         self._session.headers.update({"User-Agent": USER_AGENT, "Accept": "application/json"})
+        self._pending: dict[tuple[str, str], CardRecord] = {}  # (id, lang) -> Karte, Namen im Hintergrund laden
+        self._pending_cv = threading.Condition()
+        threading.Thread(target=self._fetch_loop, daemon=True, name="namen").start()
 
     def preload(self, languages: list[str]) -> None:
         """Pokémon-Namenslisten der gewählten Sprachen laden (Hintergrund-Thread empfohlen)."""
@@ -71,10 +74,41 @@ class CardNames:
             return self._pokemon.get(lang, {}).get(rec.id) or rec.name
         return self._mtg_name(rec, lang) or rec.name
 
+    def name_nowait(self, rec: CardRecord, lang: str) -> str:
+        """Wie `name()`, aber nie mit Netzwerkzugriff (für das Dock): fehlende Magic-Namen werden im Hintergrund
+        nachgeladen, bis dahin gilt der englische Name."""
+        if lang == "en" or lang not in LANGUAGES or rec.game == "pokemon":
+            return self.name(rec, lang)
+        row = self._cached(rec.id, lang)
+        if row is not None:
+            return row[0] or rec.name
+        with self._pending_cv:
+            self._pending[(rec.id, lang)] = rec
+            self._pending_cv.notify()
+        return rec.name
+
+    def _fetch_loop(self) -> None:
+        while True:
+            with self._pending_cv:
+                while not self._pending:
+                    self._pending_cv.wait()
+                (_, lang), rec = self._pending.popitem()
+            try:
+                self._mtg_name(rec, lang)
+            except Exception as err:
+                print(f"[namen] {rec.name} ({lang}): {err}")
+            time.sleep(0.1)  # Scryfall bittet um höchstens 10 Anfragen pro Sekunde
+
+    def _cached(self, card_id: str, lang: str):
+        with self._lock:
+            return self._db.execute("SELECT name FROM names WHERE id = ? AND lang = ?", (card_id, lang)).fetchone()
+
     def _mtg_name(self, rec: CardRecord, lang: str) -> str | None:
-        row = self._db.execute("SELECT name FROM names WHERE id = ? AND lang = ?", (rec.id, lang)).fetchone()
+        row = self._cached(rec.id, lang)
         if row:
             return row[0] or None
+        if not rec.set_code or not rec.number:
+            return None
         name = ""
         try:
             r = self._session.get(f"https://api.scryfall.com/cards/{rec.set_code.lower()}/{rec.number}/{LANGUAGES[lang][2]}", timeout=15)
