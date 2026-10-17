@@ -49,13 +49,13 @@ def build_pokemon(cat: Catalog, sets: list[str] | None, lang: str = "en") -> lis
         detail = get_json(f"https://api.tcgdex.net/v2/{lang}/sets/{s['id']}")
         total = (detail.get("cardCount") or {}).get("official")
         for c in detail.get("cards", []):
-            if not c.get("image"):
-                continue
+            # Karten ohne Bild (z. B. „Celebrations Classic Collection“) trotzdem aufnehmen: suchbar, bestätigbar,
+            # mit Preis – erkannt werden sie dann über gelernte Referenzen aus Bestätigungen
             records.append(CardRecord(
                 game="pokemon", id=c["id"], name=c["name"], set_code=s["id"], set_name=detail.get("name"),
                 number=str(c["localId"]), set_total=total, lang=lang, released=detail.get("releaseDate"),
                 cardmarket_id=None,  # kommt in Phase 2 aus den Kartendetails bzw. der Cardmarket-Produktliste
-                illustration_id=None, finishes=None, image_url=f"{c['image']}/low.webp",
+                illustration_id=None, finishes=None, image_url=f"{c['image']}/low.webp" if c.get("image") else None,
             ))
         print(f"\r[pokemon] Sets {i}/{len(wanted)}, Karten {len(records)}", end="", flush=True)
     print()

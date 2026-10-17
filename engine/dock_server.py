@@ -33,6 +33,16 @@ ASK_MIN_SHOWN_S = 2.0  # kürzer gezeigte Fragen bleiben nicht als „nicht im B
 ASK_RELEASE_S = 10.0  # so lange muss eine gefragte Karte sicher erkannt sein, bevor die Frage von selbst endet
 
 
+def _split_query(q: str) -> tuple[str, str | None, str | None]:
+    """„Glurak 4/102“ → ("Glurak", "4", "102"); „Sol Ring 409“ → ("Sol Ring", "409", None)."""
+    import re
+
+    m = re.search(r"(?:^|\s)#?([A-Za-z]{0,6}\d+[A-Za-z]?)\s*(?:/\s*(\d+))?\s*$", q)
+    if not m:
+        return q, None, None
+    return q[:m.start()].strip(), m.group(1), m.group(2)
+
+
 def card_key(game: str, card_id: str) -> str:
     return f"{game}|{card_id}"
 
@@ -316,17 +326,63 @@ class DockApi:
             return {"ok": False, "error": "Lernspeicher nicht geladen"}
         return {"ok": True, "removed": self.shared.learned.forget(key)}
 
-    def search(self, q: str, game: str | None, limit: int) -> dict:
+    def search(self, q: str, game: str | None, limit: int, lang: str = "de") -> dict:
+        """Suche nach Name (englisch oder in einer geladenen Sprache, z. B. „Glurak“) und/oder Nummer
+        („4/102“, „025“, „CC002“). Beispiele: „Glurak 4/102“, „Sol Ring 409“, „4/102“."""
         cat = self.catalog
         q = (q or "").strip()
         if cat is None or len(q) < 2:
             return {"results": []}
-        sql = "WHERE name LIKE ?" + (" AND game = ?" if game else "") + " ORDER BY (name = ?) DESC, released DESC LIMIT ?"
-        args = [f"%{q}%"] + ([game] if game else []) + [q, int(limit)]
-        recs = cat._rows(sql, tuple(args))
-        return {"results": [{"key": card_key(r.game, r.id), "name": r.name, "set_name": r.set_name,
-                             "set_code": r.set_code, "number": r.printed_number,
+        name_q, number, total = _split_query(q)
+        where, args = [], []
+        if game:
+            where.append("game = ?")
+            args.append(game)
+        if number:
+            # Nummern ohne führende Nullen vergleichen ("025" = "25"); Buchstaben-Nummern (CC002, SWSH066) exakt
+            where.append("(ltrim(lower(number), '0') = ltrim(lower(?), '0'))")
+            args.append(number)
+        if total:
+            where.append("set_total = ?")
+            args.append(int(total))
+        if name_q:
+            # Ganzer Name (auch übersetzt) – oder jedes Wort in Name bzw. Set-Name („Glurak Classic“)
+            ids = [cid for g, cid in self.shared.names.find_ids(name_q) if not game or g == game]
+            cond, cargs = "name LIKE ?", [f"%{name_q}%"]
+            if ids:
+                en = self._english_names(ids)
+                cond += f" OR id IN ({','.join('?' * len(ids))})" + (f" OR name IN ({','.join('?' * len(en))})" if en else "")
+                cargs += ids + en
+            words = name_q.split()
+            if len(words) > 1:
+                parts = []
+                for w in words:
+                    wids = [cid for g, cid in self.shared.names.find_ids(w) if not game or g == game]
+                    wen = self._english_names(wids) if wids else []
+                    part = ("(name LIKE ? OR set_name LIKE ?"
+                            + (f" OR id IN ({','.join('?' * len(wids))})" if wids else "")
+                            + (f" OR name IN ({','.join('?' * len(wen))})" if wen else "") + ")")
+                    parts.append(part)
+                    cargs += [f"%{w}%", f"%{w}%"] + wids + wen
+                cond += " OR (" + " AND ".join(parts) + ")"
+            where.append(f"({cond})")
+            args += cargs
+        if not where:
+            return {"results": []}
+        sql = "WHERE " + " AND ".join(where) + " ORDER BY released DESC LIMIT ?"
+        recs = cat._rows(sql, tuple(args + [int(limit)]))
+        return {"results": [{"key": card_key(r.game, r.id), "name": self.shared.names.name_nowait(r, lang),
+                             "set_name": r.set_name, "set_code": r.set_code, "number": r.printed_number,
                              "image": self._image_url(card_key(r.game, r.id))} for r in recs]}
+
+    def _english_names(self, ids: list[str]) -> list[str]:
+        """Englische Katalognamen zu übersetzt gefundenen Karten („Glurak“ → „Charizard“) – so werden auch Drucke
+        ohne übersetzten Namen gefunden (z. B. Celebrations Classic Collection)."""
+        if not ids:
+            return []
+        rows = self.catalog.db.execute(
+            f"SELECT DISTINCT name FROM cards WHERE id IN ({','.join('?' * len(ids[:300]))}) LIMIT 20", ids[:300]).fetchall()
+        return [r[0] for r in rows]
 
     def crop(self, sid: str, track_id) -> bytes | None:
         sess = self._session(sid)
@@ -386,6 +442,16 @@ def _handler(api: DockApi):
                             return self._send(200, f.read(), "image/jpeg", {"Cache-Control": "max-age=86400"})
                     rec = api._record(card_key(game, cid))
                     if rec is not None and rec.image_url:
+                        # Ohne lokale Bildersammlung (Datenpakete enthalten keine Bilder): einmal laden und behalten
+                        from cardengine.card_database.build import _download
+
+                        try:
+                            _download(rec)
+                        except Exception as err:
+                            print(f"[dock] Bild {game}/{cid} nicht geladen: {err}")
+                        if os.path.exists(path):
+                            with open(path, "rb") as f:
+                                return self._send(200, f.read(), "image/jpeg", {"Cache-Control": "max-age=86400"})
                         self.send_response(302)
                         self.send_header("Location", rec.image_url)
                         self.end_headers()

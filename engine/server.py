@@ -103,21 +103,27 @@ class Shared:
 
     def _load(self, languages):
         try:
+            from cardengine.config import load_config
             from cardengine.maintenance import Maintenance
             from cardengine.models_fetch import ensure_models
             from cardengine.pricing.service import PriceService
             from cardengine.recognition.embedder import Embedder
-            from cardengine.recognition.index import index_path
+            from cardengine.recognition.index import has_index, migrate_legacy
             from cardengine.recognition.identifier import CardIdentifier
             from run import build_detector
 
             t0 = time.time()
+            cfg = load_config()  # Voreinstellungen aus dem Installer (data/config.json)
+            games = cfg["games"]
+            languages = list(dict.fromkeys([*languages, *cfg["languages"]]))
             self.status = "Modelle werden geprüft/geladen …"
             ensure_models(verbose=False)
-            if not os.path.exists(index_path(Embedder.default_index_name())):
-                # Erster Start ohne Setup-Daten: Grunddaten jetzt aufbauen (dauert einige Minuten)
-                self.status = "Erster Start: Kartendaten werden aufgebaut"
-                self.maintenance = Maintenance(gpu_lock=self.lock)
+            index_name = Embedder.default_index_name()
+            migrate_legacy(index_name)  # alte gemeinsame Indexdatei einmalig je Spiel aufteilen
+            if not any(has_index(index_name, g) for g in games):
+                # Erster Start ohne Setup-Daten: Datenpakete bzw. Grunddaten jetzt holen/aufbauen
+                self.status = "Erster Start: Kartendaten werden geladen"
+                self.maintenance = Maintenance(gpu_lock=self.lock, games=games)
                 self.maintenance.initial()
             self.prices = PriceService(history_days=180).start()
             threading.Thread(target=self.names.preload, args=(languages,), daemon=True).start()
@@ -125,7 +131,7 @@ class Shared:
             # Gemeinsamer Detektor mit niedriger Schwelle; jede Sitzung filtert nach ihrer Empfindlichkeit
             det.base.conf = 0.2
             self.detector = Locked(det, self.lock)
-            identifier = CardIdentifier.load_default()
+            identifier = CardIdentifier.load_default(games=games)
             try:
                 from cardengine.learning import LearnedStore
 
@@ -141,7 +147,7 @@ class Shared:
             # Daten im Hintergrund aktuell halten (neue Sets, Magic-Bilder, Preisverlauf)
             self.maintenance = Maintenance(
                 embedder_factory=lambda: self.identifier._obj.embedder,
-                on_index_updated=self._swap_index, gpu_lock=self.lock,
+                on_index_updated=self._swap_index, gpu_lock=self.lock, games=games,
             ).start()
         except Exception as err:
             self.status = f"Fehler beim Laden: {err}"
@@ -380,7 +386,8 @@ class Session:
     def _result(self, seq: int, tracks, shape) -> dict:
         st = self.settings
         out = []
-        self._prune_labels({t.id for t in self.pipeline.tracker.tracks if t.state != "rejected"})
+        # Kennzeichen erst freigeben, wenn der Track ganz weg ist (auch verworfene Karten können im Dock noch stehen)
+        self._prune_labels({t.id for t in self.pipeline.tracker.tracks})
         hl = self.current_highlight()
         show_labels = self._labels_visible()
         for t in tracks:

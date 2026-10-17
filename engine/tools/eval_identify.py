@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cardengine.card_database.catalog import Catalog  # noqa: E402
 from cardengine.geometry import rectify  # noqa: E402
 from cardengine.recognition.embedder import Embedder  # noqa: E402
-from cardengine.recognition.index import EmbeddingIndex, build_index, index_path  # noqa: E402
+from cardengine.recognition.index import EmbeddingIndex, available_games, build_index, migrate_legacy  # noqa: E402
 
 
 def camera_view(card: np.ndarray, rng: random.Random, card_px: int) -> tuple[np.ndarray, np.ndarray]:
@@ -73,7 +73,8 @@ def main():
     np.random.seed(args.seed)
 
     emb = Embedder(args.model)
-    index = EmbeddingIndex.load(emb.index_name) if os.path.exists(index_path(emb.index_name)) else build_index(emb)
+    migrate_legacy(emb.index_name)
+    index = EmbeddingIndex.load(emb.index_name) if available_games(emb.index_name) else build_index(emb)
     missing = [r for r in Catalog().all(args.game) if os.path.exists(r.image_path) and index.vector(f"{r.game}|{r.id}") is None]
     if missing:
         index = build_index(emb)

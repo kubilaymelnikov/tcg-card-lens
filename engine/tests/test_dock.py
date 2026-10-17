@@ -261,3 +261,19 @@ def test_identifier_prefers_quarter_turn_only_with_clear_margin():
     ident = CardIdentifier(Index(), cat, Emb([0.55, 0.50, 0.85, 0.40])).identify(
         np.zeros((720, 1280, 3), np.uint8), quad, allow_quarter=False)
     assert ident.turns == 0  # vom Nutzer festgelegte Lage: keine Querlage
+
+
+def test_duplicate_tracks_of_same_card_are_merged():
+    from cardengine.tracking import CardTracker, TrackerConfig
+
+    tr = CardTracker(TrackerConfig.table())
+    # Karte und (fast deckungsgleich) Toploader im selben Durchlauf erkannt → zwei Tracks
+    tr.update([Detection(order_corners(QUAD), 0.9), Detection(order_corners(QUAD + np.float32([4, 3])), 0.8)], 0.0)
+    assert len(tr.tracks) == 1
+    # Ein bereits erkannter Track gewinnt gegen einen neuen an gleicher Stelle
+    t = tr.tracks[0]
+    t.identity = _identity()
+    tr.tracks.append(type(t)(corners=t.corners + 2, display=t.corners + 2, score=0.9, game=None, first_seen=1.0,
+                             last_confirmed=1.0))
+    tr.update([], 1.0)
+    assert tr.tracks == [t]

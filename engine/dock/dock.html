@@ -94,6 +94,7 @@ h2 .count {
 .tile-confirm { border-color: rgba(240,180,41,.55); background: linear-gradient(180deg, rgba(240,180,41,.08), transparent 70px), var(--tile); }
 .tile { position: relative; }
 /* ✕ oben rechts: Karte ohne Angabe von Gründen ausblenden */
+.img.previewing { outline: 2px solid var(--accent, #4c8dff); outline-offset: -2px; }
 .tile .close {
   position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%;
   background: rgba(229,72,77,.15); color: #ff5a5f; font-size: 13px; font-weight: 700; line-height: 20px; cursor: pointer; z-index: 2;
@@ -338,6 +339,8 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     box._url = url;
     var img = box.firstElementChild;
     if (!url) { img.removeAttribute('src'); box.classList.add('missing'); return; }
+    // Ausgeblendete Bilder lädt der Browser bei loading=lazy nie – gesetzte Bilder daher sofort laden
+    img.loading = 'eager';
     if (!img.getAttribute('src') || box.classList.contains('missing')) { img.src = url; return; }
     // Vorladen, dann tauschen – so bleibt das alte Bild bis zum Wechsel stehen.
     var pre = new Image();
@@ -607,7 +610,7 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
   }
 
   // ---------- Alternativen / Suche ----------
-  function optButton(o, current, onPick) {
+  function optButton(o, current, onPick, onHover) {
     var b = el('button', 'opt' + (current ? ' current' : ''));
     b.type = 'button';
     var box = imgBox();
@@ -627,6 +630,12 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     b.appendChild(box);
     b.appendChild(tx);
     b.addEventListener('click', function () { onPick(o); });
+    if (onHover) {
+      b.addEventListener('mouseenter', function () { onHover(o); });
+      b.addEventListener('focus', function () { onHover(o); });
+      b.addEventListener('mouseleave', function () { onHover(null); });
+      b.addEventListener('blur', function () { onHover(null); });
+    }
     return b;
   }
 
@@ -639,13 +648,28 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
       '<div class="pk-msg" data-r="cmsg" hidden>Keine Alternativen vorhanden.</div>' +
       '<div class="search">' +
       '  <input type="search" data-r="q" placeholder="Karte suchen …" autocomplete="off" spellcheck="false" aria-label="Karte suchen">' +
-      '  <select data-r="game" aria-label="Spiel"><option value="">Alle</option><option value="pokemon">Pokémon</option><option value="magic">Magic</option></select>' +
+      '  <select data-r="game" aria-label="Spiel"><option value="">Alle</option><option value="pokemon">Pokémon</option><option value="mtg">Magic</option><option value="ygo">Yu-Gi-Oh!</option></select>' +
       '</div>' +
       '<div class="pk-msg" data-r="smsg" hidden></div>' +
       '<div class="pk-list" data-r="results"></div>' +
       '<div class="pk-foot" data-r="foot" hidden><button type="button" class="btn sm danger" data-r="reject">Keine Karte</button></div>';
     var r = refs(root);
-    function pick(o) { confirmKey(t, o.key, o); }
+    function pick(o) { preview(null); confirmKey(t, o.key, o); }
+    // Alternative überfahren → in der Referenz-Vorschau neben dem Kamerabild zeigen
+    function preview(o) {
+      var tr = t.r;
+      if (!tr || !tr.image) return;
+      var cap = tr.fimage ? tr.fimage.querySelector('figcaption') : null;
+      if (o) {
+        setImg(tr.image, o.image);
+        tr.image.classList.add('previewing');
+        if (cap) cap.textContent = 'Vorschau: ' + [o.set_name || o.set_code, o.number ? 'Nr. ' + o.number : ''].filter(Boolean).join(' · ');
+      } else {
+        setImg(tr.image, t.shown ? t.shown.image : null);
+        tr.image.classList.remove('previewing');
+        if (cap) cap.textContent = 'Referenz';
+      }
+    }
     var p = {
       el: root, open: false, userOpen: false, sig: null, gameSet: false, timer: null, req: 0, r: r,
       setOpen: function (on) {
@@ -662,14 +686,14 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
       },
       update: function () {
         var c = t.shown || {};
-        if (!p.gameSet && c.game) { r.game.value = c.game === 'magic' || c.game === 'pokemon' ? c.game : ''; p.gameSet = true; }
+        if (!p.gameSet && c.game) { r.game.value = c.game === 'mtg' || c.game === 'pokemon' || c.game === 'ygo' ? c.game : ''; p.gameSet = true; }
         show(r.foot, t.mode === 'compact');
         var cands = Array.isArray(c.candidates) ? c.candidates : [];
         var sig = JSON.stringify([c.key, cands]);
         if (sig === p.sig) return;
         p.sig = sig;
         r.cands.textContent = '';
-        cands.forEach(function (o) { r.cands.appendChild(optButton(o, o.key === c.key, pick)); });
+        cands.forEach(function (o) { r.cands.appendChild(optButton(o, o.key === c.key, pick, preview)); });
         show(r.cmsg, cands.length === 0);
         if (t.busy) r.cands.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
       }
@@ -695,7 +719,7 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
           var list = Array.isArray(res.json.results) ? res.json.results : [];
           r.results.textContent = '';
           var cur = t.shown ? t.shown.key : null;
-          list.forEach(function (o) { r.results.appendChild(optButton(o, o.key === cur, pick)); });
+          list.forEach(function (o) { r.results.appendChild(optButton(o, o.key === cur, pick, preview)); });
           show(r.smsg, list.length === 0);
           setText(r.smsg, 'Keine Treffer.');
         }).catch(function () {
@@ -853,7 +877,7 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
       (c.state === 'new' || c.state === 'identifying') ? 'Wird erkannt …' : 'Unbekannte Karte');
     setText(r.name, title);
     setText(r.meta, metaLine(c));
-    setImg(r.image, c.image);
+    if (!r.image.classList.contains('previewing')) setImg(r.image, c.image); // Vorschau einer Alternative hat Vorrang
 
     if (t.mode === 'confirm') {
       setImg(r.crop, c.crop);

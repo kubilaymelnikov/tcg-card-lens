@@ -108,9 +108,28 @@ Nachtraining (Detektor, Schwellen).
 
 ## Installer
 
-`installer/build-installer.ps1` baut `TCGCardLens-Setup-<version>.exe` (Inno Setup, ~3 MB): Plugin nach
-`%ProgramData%\obs-studio\plugins`, Engine nach `%LOCALAPPDATA%\TCGCardLens`, danach `setup-engine.ps1`
-(Python 3.12, PyTorch CUDA/CPU, Pakete, Modelle, Grunddaten). Magic-Bilder und neue Sets ergänzt die Engine im
-Hintergrund (`cardengine/maintenance.py`). Engine-Autostart ist im Filter standardmäßig aktiv (ohne Fenster,
-Log: `engine\data\engine.log`, beendet sich nach 15 min ohne OBS).
+`installer/build-installer.ps1` baut `TCGCardLens-Setup-<version>.exe` (Inno Setup, ~3 MB). Der Installer legt
+das Plugin nach `%ProgramData%\obs-studio\plugins` und die Engine nach `%LOCALAPPDATA%\TCGCardLens`. Danach startet er
+`setup-engine.ps1`.
+
+**Auswahlseite „Spiele und Sprachen“** (nach den Aufgaben, nur wenn die Engine jetzt eingerichtet wird):
+- Spiele: alle vorausgewählt. Die Liste steht als `GameList` im `.iss`, neue Spiele werden dort ergänzt.
+- Namenssprachen: Deutsch, Englisch, Französisch, Italienisch, Spanisch, Portugiesisch, Japanisch.
+  Vorausgewählt sind Deutsch und Englisch.
+
+Die Auswahl geht als `-Games pokemon,mtg -Languages de,en` an `setup-engine.ps1`. Das Skript speichert sie über
+`python -m cardengine.config` in `engine\data\config.json`. Liegt neben der Setup-exe ein Ordner `packs`, kommt
+`-PackDir <ordner>` dazu (Offline-Installation).
+
+`setup-engine.ps1` richtet Python 3.12 ein, dazu PyTorch (CUDA oder CPU), die Pakete und die Modelle. Danach
+speichert es die Auswahl und ruft `cardengine.maintenance --initial` auf. Das installiert je Spiel ein
+**Datenpaket**: Kartenkatalog + Erkennungs-Index, ohne Bilder, Magic ca. 87 MB, Pokémon ca. 16 MB. Fehlt ein Paket,
+baut das Skript wie bisher lokal auf (siehe [DATENPAKETE.md](DATENPAKETE.md)). Neue Sets ergänzt die Engine im
+Hintergrund (`cardengine/maintenance.py`), Bilder lädt sie dabei nur für Karten ohne Index-Eintrag.
+
+Weitere Parameter: `-PackUrl` (Basis-URL der Pakete) und `-SkipData`. Ohne Parameter, etwa über die Verknüpfung
+„Engine neu einrichten“, bleibt die bisherige Auswahl.
+
+Engine-Autostart ist im Filter standardmäßig aktiv: ohne Fenster, Log in `engine\data\engine.log`, Ende nach
+15 min ohne OBS.
 Hinweis: PowerShell-Skripte müssen als UTF-8 **mit BOM** gespeichert sein (Windows PowerShell 5.1).

@@ -34,6 +34,7 @@ class TrackerConfig:
     # Wiederaufnahme: Eine kurz verlorene Karte (z. B. beim Verschieben) behält Nummer und Erkennung
     revive_s: float = 4.0  # so lange werden verlorene Tracks gemerkt
     revive_iou: float = 0.3  # neue Detektion mit dieser Überlappung zum letzten Ort → derselbe Track
+    duplicate_iou: float = 0.6  # zwei Tracks mit dieser Überlappung sind dieselbe Karte → nur einen behalten
 
     @classmethod
     def facecam(cls) -> "TrackerConfig":
@@ -235,7 +236,26 @@ class CardTracker:
                     self.tracks.append(old)
                     continue
                 self.tracks.append(Track(corners=c, display=c.copy(), score=d.score, game=d.game, first_seen=now, last_confirmed=now))
+        self._dedupe()
         return self.tracks
+
+    def _dedupe(self) -> None:
+        """Doppelte Tracks derselben Karte auflösen (z. B. Karte + Toploader kurz getrennt erkannt, oder ein
+        ruhender Track bleibt neben einem neu angelegten bestehen). Behalten wird der aussagekräftigere."""
+        if len(self.tracks) < 2:
+            return
+
+        def rank(t: Track):
+            ident = t.identity
+            return (t.confirmed, ident is not None and ident.certain, ident is not None, t.hits, -t.first_seen)
+
+        keep: list[Track] = []
+        for t in sorted(self.tracks, key=rank, reverse=True):
+            if not any(iou_quads(t.corners, k.corners) >= self.cfg.duplicate_iou for k in keep):
+                keep.append(t)
+        if len(keep) < len(self.tracks):
+            ids = {id(t) for t in keep}
+            self.tracks = [t for t in self.tracks if id(t) in ids]
 
     def _revive(self, corners: np.ndarray, now: float) -> Track | None:
         """Kürzlich verlorenen Track an (fast) gleicher Stelle zurückholen – gleiche ID, gleiche Erkennung.
