@@ -126,7 +126,9 @@ class FakeEmbedder:
         self.vecs = [upright, flipped]
 
     def embed(self, images):
-        return np.stack(self.vecs[:len(images)]).astype(np.float32)
+        # Reihenfolge der Lagen im Identifier: 0°, 180°, 90°, 270° – die Querlagen passen hier zu nichts
+        zero = np.zeros_like(self.vecs[0])
+        return np.stack((self.vecs + [zero, zero])[:len(images)]).astype(np.float32)
 
 
 FRAME = np.full((720, 1280, 3), 100, np.uint8)
@@ -187,5 +189,5 @@ def test_identifier_negative_example_suppresses(tmp_path):
 
 def test_embed_view_returns_embedding_and_rectified_image():
     ident = make_identifier(unit(0))
-    emb, img = ident.embed_view(FRAME, CORNERS, rotate180=True)
+    emb, img = ident.embed_view(FRAME, CORNERS, turns=2)
     assert emb.shape == (DIM,) and img.shape == (RECT_H, RECT_W, 3)

@@ -224,3 +224,40 @@ def test_dismiss_hides_card_without_learning():
     p.process(scene_with_card(QUAD), now=0.05)
     assert t.hidden and _cards(api) == []
     p.close()
+
+
+def test_rotate_turns_track_and_fixes_orientation():
+    p, t = _pipeline_with_track()
+    before = t.corners.copy()
+    t.identity, t.state = _identity(), "identified"
+    p.rotate(t.id)
+    p.process(scene_with_card(QUAD), now=0.05)
+    assert np.allclose(t.corners, np.roll(before, 1, axis=0), atol=1.0)
+    assert t.orientation_fixed and t.user_turns == 1 and t.identity is None and t.orient_rev == 1
+    p.close()
+
+
+def test_identifier_prefers_quarter_turn_only_with_clear_margin():
+    from cardengine.recognition.identifier import CardIdentifier
+
+    class Emb:
+        def __init__(self, sims):
+            self.sims = sims  # Ähnlichkeit je Lage in Identifier-Reihenfolge 0°, 180°, 90°, 270°
+
+        def embed(self, images):
+            return np.stack([np.array([s, np.sqrt(max(0.0, 1 - s * s))], np.float32) for s in self.sims[:len(images)]])
+
+    class Index:
+        def search(self, q, k=10, game=None):
+            return [("pokemon|c1", float(q[0]))]
+
+    rec = FakeCatalog.recs["c1"]
+    cat = SimpleNamespace(get=lambda g, i: SimpleNamespace(**{**vars(rec), "number": "25", "set_total": 165}))
+    quad = order_corners(QUAD)
+    ident = CardIdentifier(Index(), cat, Emb([0.55, 0.50, 0.85, 0.40])).identify(np.zeros((720, 1280, 3), np.uint8), quad)
+    assert ident.turns == 1
+    ident = CardIdentifier(Index(), cat, Emb([0.80, 0.50, 0.83, 0.40])).identify(np.zeros((720, 1280, 3), np.uint8), quad)
+    assert ident.turns == 0  # 90° nur knapp besser → aufrecht bleibt
+    ident = CardIdentifier(Index(), cat, Emb([0.55, 0.50, 0.85, 0.40])).identify(
+        np.zeros((720, 1280, 3), np.uint8), quad, allow_quarter=False)
+    assert ident.turns == 0  # vom Nutzer festgelegte Lage: keine Querlage

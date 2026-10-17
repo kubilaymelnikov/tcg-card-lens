@@ -338,6 +338,9 @@ class Handler(BaseHTTPRequestHandler):
                 STATE["learned"]["negatives"] += 1
                 STATE["learned"]["dataset"] += 1
                 return self.json({"ok": True})
+            if path == "/api/rotate":  # ↻: Lage drehen → neuer Kamera-Ausschnitt
+                c["_v"] += 1
+                return self.json({"ok": True})
             if path == "/api/dismiss":  # ✕: ohne Gründe ausblenden, nichts lernen
                 s["cards"].remove(c)
                 if s["highlight"] == c["label"]:

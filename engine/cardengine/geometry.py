@@ -37,11 +37,15 @@ def quad_area(q: np.ndarray) -> float:
     return float(cv2.contourArea(np.asarray(q, dtype=np.float32)))
 
 
-def rectify(frame: np.ndarray, quad: np.ndarray, rotate180: bool = False, margin: float = 0.0) -> np.ndarray:
-    """Karte perspektivisch entzerren (RECT_W × RECT_H, optional mit Rand in Kartenanteilen)."""
+def rectify(frame: np.ndarray, quad: np.ndarray, rotate180: bool = False, margin: float = 0.0, turns: int = 0) -> np.ndarray:
+    """Karte perspektivisch entzerren (RECT_W × RECT_H, optional mit Rand in Kartenanteilen).
+
+    `turns` dreht die Eckenzuordnung in Vierteldrehungen (1 = 90°); `rotate180` entspricht `turns=2`.
+    """
     q = np.asarray(quad, dtype=np.float32)
-    if rotate180:
-        q = np.roll(q, 2, axis=0)
+    k = (int(turns) + (2 if rotate180 else 0)) % 4
+    if k:
+        q = np.roll(q, k, axis=0)
     mx, my = RECT_W * margin, RECT_H * margin
     dst = np.float32([[mx, my], [mx + RECT_W, my], [mx + RECT_W, my + RECT_H], [mx, my + RECT_H]])
     m = cv2.getPerspectiveTransform(q, dst)

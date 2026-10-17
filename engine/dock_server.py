@@ -160,7 +160,8 @@ class DockApi:
             return None  # noch in Erkennung oder verworfen
         lang = sess.settings.get("display_language", "de")
         label = sess.label_for(t.id)
-        crop_v = sum(t.unlocks.values()) * 1000 + (0 if t.finalized else int(time.time() // 2) % 1000)
+        crop_v = (t.orient_rev * 1_000_000 + sum(t.unlocks.values()) * 1000
+                  + (0 if t.finalized else int(time.time() // 2) % 1000))
         card = {
             "label": label, "track": t.id, "state": t.state, "confirmed": bool(t.confirmed),
             "uncertain": not t.confirmed and (ident is None or not ident.certain),
@@ -241,11 +242,13 @@ class DockApi:
             self.shared.learned.add_reference(key, emb, rect, {
                 "proposed_key": proposed, "similarity": None if old is None else float(old.similarity),
                 "method": None if old is None else old.method, "source": sess.source, "game": rec.game,
+                "user_turns": int(getattr(t, "user_turns", 0)),  # Karte vorher im Dock gedreht (Lage war falsch)
             })
         identity = Identity(game=rec.game, card_id=rec.id, name=rec.name, set_code=rec.set_code,
                             set_name=rec.set_name, number=rec.printed_number, certain=True, similarity=1.0,
                             method="bestätigt")
         identity.rotate180 = rot
+        identity.turns = 2 if rot else 0
         identity.alternatives = list(getattr(old, "alternatives", None) or [])
         if self.shared.prices is not None:
             try:
@@ -283,6 +286,14 @@ class DockApi:
         self._resolve(sid, track_id)
         if t is not None:
             sess.pipeline.dismiss(t.id)
+        return {"ok": True}
+
+    def rotate(self, sid: str, track_id) -> dict:
+        sess = self._session(sid)
+        t = self._track(sess, track_id)
+        if t is None:
+            return {"ok": False, "error": "Karte gerade nicht im Bild – kurz warten oder Karte ruhig hinlegen"}
+        sess.pipeline.rotate(t.id)
         return {"ok": True}
 
     def refresh(self, sid: str, track_id) -> dict:
@@ -394,6 +405,8 @@ def _handler(api: DockApi):
                     return self._json(api.confirm(body["session"], body["track"], body["key"]))
                 if path == "/api/reject":
                     return self._json(api.reject(body["session"], body["track"]))
+                if path == "/api/rotate":
+                    return self._json(api.rotate(body["session"], body["track"]))
                 if path == "/api/dismiss":
                     return self._json(api.dismiss(body["session"], body["track"]))
                 if path == "/api/refresh":

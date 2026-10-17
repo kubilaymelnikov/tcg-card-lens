@@ -100,6 +100,12 @@ h2 .count {
 }
 .tile .close:hover, .tile .close:focus-visible { opacity: 1; background: #e5484d; color: #fff; }
 .tile-confirm .ct-head { padding-right: 22px; }
+figure[data-r="fcrop"] { position: relative; }
+.tile .rot {
+  position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); padding: 2px 8px; border-radius: 10px;
+  border: 1px solid rgba(255,255,255,.25); background: rgba(20,22,28,.8); color: #e8eaf0; font-size: 11px; cursor: pointer;
+}
+.tile .rot:hover { background: var(--accent, #4c8dff); border-color: transparent; }
 .tile-compact .cm-info { padding-right: 18px; }
 /* Karte fehlt gerade in /api/state bzw. ist "rejected": letzter Inhalt bleibt, aber ausgegraut. */
 .tile.gone { border-style: dashed; }
@@ -589,6 +595,11 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
       layout();
     });
   }
+  function rotateCard(t) {
+    act(t, '/api/rotate', { session: t.sid, track: t.track }).then(function (ok) {
+      if (ok) t.freshUntil = Date.now() + 6000; // gedrehtes Kamerabild und neue Erkennung sofort zeigen
+    });
+  }
   function refreshCard(t) {
     act(t, '/api/refresh', { session: t.sid, track: t.track }).then(function (ok) {
       if (ok) t.freshUntil = Date.now() + 5000; // eigener Wunsch: neue Daten auch bei Maus über der Kachel zeigen
@@ -716,7 +727,8 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     '  <span class="sim" data-r="sim" title="Ähnlichkeit"></span>' +
     '</div>' +
     '<div class="compare">' +
-    '  <figure data-r="fcrop"><figcaption>Kamera</figcaption></figure>' +
+    '  <figure data-r="fcrop"><figcaption>Kamera</figcaption>' +
+    '    <button type="button" class="rot" data-r="rotate" title="Karte liegt falsch herum? Um 90° drehen und neu erkennen" aria-label="Drehen">↻ Drehen</button></figure>' +
     '  <figure data-r="fimage"><figcaption>Referenz</figcaption></figure>' +
     '  <button type="button" class="newsug" data-r="newsug" hidden title="Die Engine schlägt inzwischen etwas anderes vor">Neuer Vorschlag verfügbar – aktualisieren</button>' +
     '</div>' +
@@ -748,6 +760,7 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     '    <div class="cm-act">' +
     '      <a data-r="cm" target="_blank" rel="noopener" hidden>Cardmarket ↗</a>' +
     '      <button type="button" class="btn icon" data-r="refresh" title="Aktualisieren" aria-label="Aktualisieren">⟳</button>' +
+    '      <button type="button" class="btn icon" data-r="rotate" title="Lage falsch? Um 90° drehen und neu erkennen" aria-label="Drehen">↻</button>' +
     '      <button type="button" class="btn sm" data-r="other" aria-expanded="false">Falsch?</button>' +
     '    </div>' +
     '  </div>' +
@@ -779,6 +792,7 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     t.el = e; t.r = refs(e); t.mode = mode; t.visible = false; t.shown = null;
     var r = t.r, p = t.picker;
     r.close.addEventListener('click', function (ev) { ev.stopPropagation(); dismissCard(t); });
+    r.rotate.addEventListener('click', function (ev) { ev.stopPropagation(); rotateCard(t); });
     if (mode === 'confirm') {
       t.autoOpened = false;
       r.crop = imgBox(); r.fcrop.insertBefore(r.crop, r.fcrop.firstChild);

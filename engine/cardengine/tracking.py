@@ -65,6 +65,9 @@ class Track:
     confirmed: bool = False  # Identität vom Nutzer bestätigt (Dock) – wird nicht mehr überschrieben
     user_rejected: bool = False  # vom Nutzer als „keine Karte“ markiert (Dock)
     hidden: bool = False  # im Dock ohne Angabe von Gründen entfernt: nicht anzeigen, nichts lernen
+    orientation_fixed: bool = False  # Nutzer hat die Karte im Dock gedreht: keine automatische 90°-Korrektur
+    user_turns: int = 0  # Vierteldrehungen durch den Nutzer (Diagnose / Lernen)
+    orient_rev: int = 0  # zählt jede Änderung der Eckenzuordnung (Dock lädt dann das Kamerabild neu)
     swap_hits: int = 0  # Swap-Prüfungen in Folge mit deutlich anderem Inhalt
     attempts: int = 0
     next_attempt: float = 0.0

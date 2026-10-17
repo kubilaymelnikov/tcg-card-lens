@@ -50,6 +50,15 @@ def _signature(frame: np.ndarray, corners: np.ndarray) -> np.ndarray:
     return v / (np.linalg.norm(v) + 1e-6)
 
 
+def _turn_track(t: Track, k: int) -> None:
+    """Eckenzuordnung eines Tracks um k Vierteldrehungen verschieben (Position bleibt, Lage der Karte ändert sich).
+    Neue Detektionen richten sich danach (tracking._align), die Drehung bleibt also bestehen."""
+    t.corners = np.roll(t.corners, k, axis=0).astype(np.float32)
+    t.display = np.roll(t.display, k, axis=0).astype(np.float32)
+    t.samples = [np.roll(s, k, axis=0) for s in t.samples]
+    t.orient_rev += 1
+
+
 def _better(new, old) -> bool:
     """Neue Identifikation übernehmen? Sicher schlägt unsicher, sonst höhere Ähnlichkeit."""
     if old is None:
@@ -163,9 +172,12 @@ class CardPipeline:
         return dets, ts, (time.perf_counter() - t0) * 1000
 
     def _identify_job(self, job):
-        track_id, frame, corners = job
+        track_id, frame, corners, allow_quarter = job
         t0 = time.perf_counter()
-        identity = self.identifier.identify(frame, corners, game=self.game)
+        if allow_quarter:
+            identity = self.identifier.identify(frame, corners, game=self.game)
+        else:
+            identity = self.identifier.identify(frame, corners, game=self.game, allow_quarter=False)
         # Preise nur für sicher identifizierte Drucke (keine falschen Preise bei unsicherer Edition)
         if identity is not None and identity.certain and identity.card_id and self.prices is not None:
             rec = self.identifier.catalog.get(identity.game, identity.card_id)
@@ -227,6 +239,12 @@ class CardPipeline:
                     elif t.confirmed:
                         pass  # vom Nutzer bestätigt: neue Ergebnisse nicht übernehmen
                     elif identity is not None and _better(identity, old):
+                        if getattr(identity, "turns", 0) % 2:
+                            # Karte lag „quer“ zur angenommenen Ausrichtung → Eckenzuordnung des Tracks mitdrehen
+                            _turn_track(t, 1)
+                            identity.turns -= 1
+                            identity.rotate180 = identity.turns == 2
+                            self.events.append(("gedreht", t.id))
                         t.identity = identity
                         t.state = "identified" if identity.certain else "uncertain"
                         self.events.append(("erkannt" if identity.certain else "unsicher", t.id))
@@ -252,7 +270,7 @@ class CardPipeline:
             t = min(candidates, key=lambda x: (order[x.state], x.first_seen))
             if t.state == "new":
                 t.state = "identifying"
-            self._id_worker.submit((t.id, frame.copy(), t.corners.copy()))
+            self._id_worker.submit((t.id, frame.copy(), t.corners.copy(), not t.orientation_fixed))
 
     # ---------- Ruhe, Feinjustierung, Hintergrund ----------
     def _current_detect_interval(self, now: float, tracks: list[Track]) -> float:
@@ -370,6 +388,20 @@ class CardPipeline:
             t.hidden = True
             if t.signature is None:  # für die Tausch-Erkennung: aktueller Inhalt an dieser Stelle
                 t.signature = _signature(frame, t.corners)
+        self.post(run)
+
+    def rotate(self, track_id: int) -> None:
+        """Karte um 90° drehen (Dock ↻) und neu erkennen; die Drehung des Nutzers gilt ab jetzt fest."""
+        def run(frame, now):
+            t = self._track(track_id)
+            if t is None:
+                return
+            _turn_track(t, 1)
+            t.user_turns = (t.user_turns + 1) % 4
+            t.orientation_fixed = True
+            t.identity, t.signature, t.state, t.confirmed = None, None, "new", False
+            t.attempts, t.next_attempt = 0, 0.0
+            self.events.append(("gedreht", t.id))
         self.post(run)
 
     def refresh(self, track_id: int) -> None:

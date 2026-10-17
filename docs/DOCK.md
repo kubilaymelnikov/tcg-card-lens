@@ -74,6 +74,7 @@ Polling alle ~500 ms. Antwort:
 | `/api/confirm` | `{"session","track","key"}` | Karte bestätigen (`key` = vorgeschlagene oder Alternative). Track wird fixiert, Preis sicher angezeigt, Referenz gelernt. |
 | `/api/reject` | `{"session","track"}` | „Keine Karte“: Track verwerfen, Stelle als Hintergrund merken, Negativbeispiel lernen. |
 | `/api/dismiss` | `{"session","track"}` | Karte ohne Angabe von Gründen ausblenden (✕): weg aus Dock und Video, nichts gelernt. Liegt dort später eine andere Karte, wird sie normal erkannt. |
+| `/api/rotate` | `{"session","track"}` | Karte um 90° drehen (Lage falsch erkannt) und neu erkennen. Die Drehung gilt danach fest für diese Karte; beim Bestätigen wird sie im Trainingsdatensatz vermerkt. |
 | `/api/refresh` | `{"session","track"}` | Karte neu erkennen und Preis neu laden. |
 | `/api/highlight` | `{"session","label"}` | Karte im Video hervorheben; `label: null` hebt auf. Läuft nach 3 s ohne Wiederholung automatisch ab. |
 | `/api/forget` | `{"key"}` | Gelernte Referenzen einer Karte löschen. |
@@ -116,3 +117,10 @@ den Rahmen pulsierend (Dicke × 1,5…2,5, ~2 Hz) mit hellem Außenschein.
 - `tools/export_training_set.py` packt den Datensatz für das Nachtraining (Embedder-Feintuning mit echten
   Kamerabildern, Kalibrierung der Schwellwerte). Neue Modelle werden gegen eine feste Testmenge geprüft und nur
   ausgeliefert, wenn sie nicht schlechter sind.
+
+## Lage der Karte (Drehung)
+
+Schräg gefilmt kann die lange Kartenseite kürzer wirken als die kurze – dann stimmt die Hochformat-Annahme aus dem
+Seitenverhältnis nicht. Die Identifikation bettet deshalb alle vier Lagen ein (0°, 180°, 90°, 270°); eine 90°-Lage
+gewinnt nur mit klarem Vorsprung (`quarter_margin`). Wird so eine Querlage erkannt, dreht die Pipeline die
+Eckenzuordnung des Tracks dauerhaft mit. Liegt die Engine trotzdem falsch, dreht ↻ im Dock die Karte von Hand.
