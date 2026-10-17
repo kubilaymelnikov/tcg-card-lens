@@ -5,6 +5,12 @@ entwickelt werden kann. Nur Python-Standardbibliothek.
 
     python tools/dock_mock.py [--port 47839] [--host 127.0.0.1] [--flaky]
 
+Kamerabild-Vorschau: Jede Sitzung liefert "frame"/"tracks" (1920×1080-Raster mit Kartenplätzen), /api/frame/<sid>
+ein generiertes SVG-Kamerabild mit grauen Karten. Auf einigen Plätzen liegt eine Karte ohne Track („übersehen“):
+Ein Klick dort (POST /api/probe) legt eine neue Karte an (how "detektor"), ein Klick auf leeren Tisch liefert
+found=false, ein aufgezogener Rahmen findet immer eine Karte (how "rahmen"). --no-frame lässt frame/tracks weg
+(alte Engine bzw. Engine ohne Bild).
+
 --flaky simuliert eine unruhige Engine: unsichere Karten fehlen zufällig für 1–3 Abfragen, wechseln ihren
 state (uncertain/failed/rejected), melden kurz needs_confirmation=false oder recheck=true, bekommen gelegentlich
 einen anderen Vorschlag; Karte D hält die Frage mit "sticky": true offen; /api/state liefert gelegentlich 500
@@ -19,6 +25,7 @@ import argparse
 import copy
 import hashlib
 import json
+import math
 import random
 import threading
 import time
@@ -94,6 +101,47 @@ def card(label: str, track: int, key: str | None, *, game: str, name: str | None
     }
 
 
+# ---------- Kamerabild-Raster (1920×1080) ----------
+FRAME_W, FRAME_H = 1920, 1080
+CARD_W, CARD_H = 230, 320
+
+
+def slot_quad(i: int) -> list:
+    """Normierte Ecken (oben links, im Uhrzeigersinn) des Kartenplatzes i: 2 Reihen × 5 Spalten, leicht gedreht."""
+    col, row = i % 5, i // 5
+    cx, cy = 200 + col * 380, 270 + row * 520
+    ang = math.radians(((i * 37) % 17) - 8)
+    ca, sa = math.cos(ang), math.sin(ang)
+    out = []
+    for dx, dy in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+        x, y = dx * CARD_W / 2, dy * CARD_H / 2
+        out.append([round((cx + x * ca - y * sa) / FRAME_W, 4), round((cy + x * sa + y * ca) / FRAME_H, 4)])
+    return out
+
+
+def point_in_quad(x: float, y: float, q: list) -> bool:
+    """Punkt in konvexem Viereck (Pixelraum, damit das Seitenverhältnis stimmt)."""
+    pts = [(a * FRAME_W, b * FRAME_H) for a, b in q]
+    px, py = x * FRAME_W, y * FRAME_H
+    sign = 0
+    for i in range(4):
+        (x0, y0), (x1, y1) = pts[i], pts[(i + 1) % 4]
+        cr = (x1 - x0) * (py - y0) - (y1 - y0) * (px - x0)
+        if cr != 0:
+            if sign and (cr > 0) != (sign > 0):
+                return False
+            sign = cr
+    return True
+
+
+def place_cards(s: dict, slots: list[int], drawn: list[int]) -> None:
+    """Karten auf Plätze legen; drawn = Plätze, auf denen physisch eine Karte liegt (auch ohne Track)."""
+    s["_drawn"] = sorted(set(drawn) | set(slots))
+    for c, i in zip(s["cards"], slots):
+        c["_slot"] = i
+        c["_quad"] = slot_quad(i)
+
+
 def initial_state() -> dict:
     s1 = {
         "id": "s1", "source": "Kamera Tisch", "highlight": None, "_hl_until": 0.0,
@@ -117,6 +165,8 @@ def initial_state() -> dict:
             card("C", 23, "pokemon|sv2-missing", game="pokemon", sim=0.92),  # Referenzbild fehlt (404)
         ],
     }
+    place_cards(s1, [0, 1, 2, 5, 7], [3, 6, 8])   # Plätze 3, 6, 8: übersehene Karten
+    place_cards(s2, [1, 2, 3], [6])
     return {"engine": "0.2.0-mock", "status": "bereit",
             "learned": {"references": 12, "negatives": 3, "dataset": 15},
             "sessions": [s1, s2]}
@@ -126,6 +176,7 @@ LOCK = threading.Lock()
 STATE = initial_state()
 START = time.time()
 FLAKY = False
+NO_FRAME = False
 HIDDEN: dict[tuple, int] = {}  # (session, track) -> noch fehlende Abfragen (nur --flaky)
 
 
@@ -191,13 +242,97 @@ def public_state() -> dict:
         if orig["_hl_until"] < now:
             orig["highlight"] = None
             s["highlight"] = None
-        s.pop("_hl_until", None)
+        for k in [k for k in s if k.startswith("_")]:
+            s.pop(k)
+        for c, oc in zip(s["cards"], orig["cards"]):
+            if oc.get("_ident_at") and oc["_ident_at"] <= now:
+                finish_identify(oc)
+                c.update(copy.deepcopy(oc))
+            c["crop"] = f"/api/crop/{s['id']}/{c['track']}?v={c['_v'] + tick}"
+        quads = {c["track"]: c.get("_quad") for c in s["cards"]}
         for c in s["cards"]:
-            v = c.pop("_v") + tick
-            c["crop"] = f"/api/crop/{s['id']}/{c['track']}?v={v}"
+            for k in [k for k in c if k.startswith("_")]:
+                c.pop(k)
         if FLAKY:
             s["cards"] = flaky_cards(s["id"], s["cards"], orig["cards"])
+        if not NO_FRAME:
+            s["frame"] = {"w": FRAME_W, "h": FRAME_H, "url": f"/api/frame/{s['id']}"}
+            s["tracks"] = [{"label": c["label"], "track": c["track"], "state": c["state"],
+                            "certain": bool(c["confirmed"] or (c["state"] == "identified"
+                                                               and not c["needs_confirmation"])),
+                            "quad": quads[c["track"]]}
+                           for c in s["cards"] if quads.get(c["track"]) and c["state"] != "rejected"]
     return out
+
+
+def free_label(s: dict) -> str:
+    used = {c["label"] for c in s["cards"]}
+    for ch in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+        if ch not in used:
+            return ch
+    return "?"
+
+
+def new_track(s: dict, quad: list, slot: int | None) -> dict:
+    """Neue Karte (wird gerade erkannt, nach ~2,5 s identifiziert)."""
+    track = 1 + max([c["track"] for sess in STATE["sessions"] for c in sess["cards"]] + [100])
+    c = card(free_label(s), track, None, game="pokemon", state="identifying", sim=0.0, price=False)
+    c.update(_quad=quad, _slot=slot, _ident_at=time.time() + 2.5)
+    s["cards"].append(c)
+    return c
+
+
+def finish_identify(c: dict) -> None:
+    key = random.choice(CATALOG)["key"]
+    info = BY_KEY[key]
+    sim = round(random.uniform(0.80, 0.97), 2)
+    needs = sim < 0.88
+    c.update(key=key, name=info["name"], set_name=info["set_name"], set_code=info["set_code"],
+             number=info["number"], image=img_url(key), game=key.split("|", 1)[0], similarity=sim,
+             state="uncertain" if needs else "identified", needs_confirmation=needs,
+             reason="geringe Ähnlichkeit" if needs else None,
+             price=None if needs else fake_price(key), _ident_at=None)
+
+
+def probe(s: dict, body: dict) -> dict:
+    """Gezielte Suche (unter LOCK): Klick auf übersehene Karte → gefunden, Rahmen → immer gefunden."""
+    if body.get("rect"):
+        x0, y0, x1, y1 = (min(1.0, max(0.0, float(v))) for v in body["rect"])
+        x0, x1 = sorted((x0, x1))
+        y0, y1 = sorted((y0, y1))
+        c = new_track(s, [[x0, y0], [x1, y0], [x1, y1], [x0, y1]], None)
+        return {"ok": True, "found": True, "label": c["label"], "track": c["track"], "how": "rahmen"}
+    x, y = float(body.get("x", -1)), float(body.get("y", -1))
+    for c in s["cards"]:
+        if c.get("_quad") and point_in_quad(x, y, c["_quad"]):
+            c["_v"] += 100
+            return {"ok": True, "found": True, "label": c["label"], "track": c["track"], "how": "vorhanden"}
+    used = {c.get("_slot") for c in s["cards"]}
+    for i in s["_drawn"]:
+        if i not in used and point_in_quad(x, y, slot_quad(i)):
+            c = new_track(s, slot_quad(i), i)
+            return {"ok": True, "found": True, "label": c["label"], "track": c["track"], "how": "detektor"}
+    return {"ok": True, "found": False, "error": "Keine Karte gefunden – Rahmen um die Karte ziehen"}
+
+
+def svg_frame(s: dict, width: int) -> bytes:
+    """Generiertes Kamerabild: dunkler Tisch, graue Karten auf den belegten Plätzen, laufende Uhr."""
+    width = max(80, min(1280, width))
+    height = round(width * FRAME_H / FRAME_W)
+    parts = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+             f'viewBox="0 0 {FRAME_W} {FRAME_H}">',
+             f'<rect width="{FRAME_W}" height="{FRAME_H}" fill="#3b3430"/>',
+             f'<rect x="40" y="40" width="{FRAME_W - 80}" height="{FRAME_H - 80}" rx="30" fill="#4a423c"/>']
+    quads = [slot_quad(i) for i in s["_drawn"]]
+    quads += [c["_quad"] for c in s["cards"] if c.get("_quad") and c.get("_slot") is None]
+    for q in quads:
+        pts = " ".join(f"{x * FRAME_W:.0f},{y * FRAME_H:.0f}" for x, y in q)
+        parts.append(f'<polygon points="{pts}" fill="#9a9a9a" stroke="#d8d8d8" stroke-width="6"/>')
+    sx = 960 + 700 * math.sin(time.time() / 3)
+    parts.append(f'<circle cx="{sx:.0f}" cy="1010" r="18" fill="#f0b429" opacity=".7"/>')
+    parts.append(f'<text x="1880" y="80" text-anchor="end" font-family="Segoe UI,Arial" font-size="48" '
+                 f'fill="#ddd">{escape(s["source"])} · {time.strftime("%H:%M:%S")}</text></svg>')
+    return "".join(parts).encode("utf-8")
 
 
 # ---------- Bilder (SVG) ----------
@@ -278,6 +413,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(404, b"", "text/plain")
             return self.send(200, svg_card(c["name"], f"{c['set_code']} {c['number']}", hue_of(key)),
                              "image/svg+xml")
+        if path.startswith("/api/frame/"):
+            parts = path.split("/")
+            w = urllib.parse.parse_qs(u.query).get("w", ["480"])[0]
+            with LOCK:
+                s, _ = find(parts[3] if len(parts) == 4 else "", None)
+                if not s or NO_FRAME:
+                    return self.send(404, b"", "text/plain")
+                body = svg_frame(s, int(w) if w.isdigit() else 480)
+            return self.send(200, body, "image/svg+xml")
         if path.startswith("/api/crop/"):
             parts = path.split("/")
             if len(parts) != 5:
@@ -296,6 +440,13 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, json.JSONDecodeError):
             return self.json({"ok": False, "error": "ungültiges JSON"}, 400)
         time.sleep(0.2 if path != "/api/highlight" else 0)
+        if path == "/api/probe":
+            time.sleep(0.9)  # die echte Suche dauert etwas
+            with LOCK:
+                s, _ = find(body.get("session"), None)
+                if not s or NO_FRAME:
+                    return self.json({"ok": False, "error": "Kein Kamerabild"}, 404)
+                return self.json(probe(s, body))
         with LOCK:
             if path == "/api/highlight":
                 s, _ = find(body.get("session"), None)
@@ -361,9 +512,11 @@ def main():
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--flaky", action="store_true",
                     help="unruhige Engine simulieren (fehlende Karten, State-Wechsel, 500er, Verzögerungen)")
+    ap.add_argument("--no-frame", action="store_true", help="kein Kamerabild (frame/tracks fehlen, alte Engine)")
     a = ap.parse_args()
-    global FLAKY
+    global FLAKY, NO_FRAME
     FLAKY = a.flaky
+    NO_FRAME = a.no_frame
     srv = ThreadingHTTPServer((a.host, a.port), Handler)
     print(f"Dock-Mock läuft: http://{a.host}:{a.port}/{'  [flaky]' if FLAKY else ''}  (Strg+C beendet)", flush=True)
     try:

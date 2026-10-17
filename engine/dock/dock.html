@@ -236,6 +236,73 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
 }
 #toast div.ok { background: #1f3326; border-color: rgba(63,185,80,.6); color: #c9f0d1; }
 #toast div.show { opacity: 1; transform: none; }
+
+/* ---------- Kamerabild-Vorschau ---------- */
+#sec-frame { margin-top: 2px; max-width: 640px; }
+#sec-frame h2 { margin: 2px 0 4px; min-height: 22px; }
+.fv-toggle {
+  display: inline-flex; align-items: center; gap: 4px; background: none; border: 0; padding: 0; cursor: pointer;
+  color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit;
+}
+.fv-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+.fv-toggle .chev { display: inline-block; width: 10px; transition: transform .15s; }
+.fv-toggle[aria-expanded=false] .chev { transform: rotate(-90deg); }
+.fv-src { color: var(--dim); text-transform: none; letter-spacing: 0; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+#sec-frame h2 .btn { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--text); flex: none; }
+.btn[aria-pressed=true] { background: var(--accent-2); border-color: var(--accent); color: #fff; }
+.fv-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 4px; }
+.fv-tabs .btn { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.fv-wrap {
+  position: relative; width: 100%; aspect-ratio: 16 / 9; background: #16171c; border: 1px solid var(--border);
+  border-radius: 4px; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; cursor: crosshair;
+}
+.fv-wrap.busy { cursor: progress; }
+.fv-img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+.fv-wrap svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.fv-empty {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
+  color: var(--dim); font-size: 12px; padding: 8px; pointer-events: none;
+}
+.fv-mode {
+  position: absolute; left: 6px; bottom: 6px; padding: 3px 8px; border-radius: 4px; pointer-events: none;
+  background: rgba(30,31,37,.9); border: 1px solid var(--accent); color: #cfe0ff; font-size: 11px;
+}
+.fv-hint { color: var(--dim); font-size: 11px; margin-top: 3px; }
+.trk { cursor: pointer; }
+.trk polygon { stroke-width: 2; stroke-linejoin: round; pointer-events: all; }
+.trk.ok polygon { stroke: var(--ok); fill: rgba(63,185,80,.07); }
+.trk.unsure polygon { stroke: var(--warn); fill: rgba(240,180,41,.08); }
+.trk.new polygon { stroke: var(--accent); fill: rgba(76,141,240,.07); stroke-dasharray: 5 4; }
+.trk.failed polygon { stroke: var(--bad); fill: rgba(242,86,75,.08); }
+.trk .bdg-r { stroke: none; }
+.trk.ok .bdg-r { fill: var(--ok); }
+.trk.unsure .bdg-r { fill: var(--warn); }
+.trk.new .bdg-r { fill: var(--accent); }
+.trk.failed .bdg-r { fill: var(--bad); }
+.trk .bdg-t { fill: #14151a; font: 700 11px "Segoe UI", system-ui, Arial, sans-serif; pointer-events: none; }
+.trk.new .bdg-t, .trk.failed .bdg-t { fill: #fff; }
+.trk.hov polygon { stroke: var(--hl); stroke-width: 3.5; fill: rgba(255,215,90,.16); stroke-dasharray: none; }
+.trk.hov .bdg-r { fill: var(--hl); }
+.trk.hov .bdg-t { fill: #14151a; }
+.trk.flash polygon { animation: fvflash .45s ease-in-out 6 alternate; }
+@keyframes fvflash { from { stroke-width: 2; } to { stroke-width: 6; stroke: #fff; fill: rgba(255,255,255,.22); } }
+.fv-drag { fill: rgba(76,141,240,.16); stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 5 3; pointer-events: none; }
+.fv-drag.busy { animation: fvdash .6s linear infinite; }
+@keyframes fvdash { to { stroke-dashoffset: -16; } }
+.fv-probe { pointer-events: none; }
+.fv-probe .dot { fill: var(--hl); }
+.fv-probe .ring {
+  fill: none; stroke: var(--hl); stroke-width: 2; transform-box: fill-box; transform-origin: center;
+  animation: fvpulse 1s ease-out infinite;
+}
+@keyframes fvpulse { from { transform: scale(.4); opacity: 1; } to { transform: scale(2.4); opacity: 0; } }
+.tile.fvhl { border-color: var(--hl); box-shadow: 0 0 0 1px var(--hl), 0 0 10px rgba(255,215,90,.25); }
+.tile.fvhl .badge { background: var(--hl); color: #1e1f25; }
+.tile.flash { animation: tileflash 1.2s ease-out; }
+@keyframes tileflash {
+  0%, 40% { box-shadow: 0 0 0 3px var(--hl), 0 0 18px rgba(255,215,90,.6); border-color: var(--hl); }
+  100% { box-shadow: none; }
+}
 </style>
 </head>
 <body>
@@ -252,6 +319,24 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
 </header>
 <div class="offline" id="offline" hidden>Engine nicht erreichbar – startet OBS-Filter? Neuer Versuch läuft …</div>
 <main id="main">
+  <section id="sec-frame">
+    <h2><button type="button" class="fv-toggle" id="fv-toggle" aria-expanded="true" aria-controls="fv-body"><span class="chev">▾</span>Kamerabild</button>
+      <span class="fv-src" id="fv-src"></span>
+      <button type="button" class="btn sm" id="fv-rect" aria-pressed="false" title="Der nächste Zieh-Vorgang zeichnet einen Rahmen um eine Karte (Esc bricht ab)">▭ Rahmen ziehen</button></h2>
+    <div id="fv-body">
+      <div class="fv-tabs" id="fv-tabs" hidden></div>
+      <div class="fv-wrap" id="fv-wrap">
+        <svg id="fv-svg" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <g id="fv-tracks"></g>
+          <rect id="fv-drag" class="fv-drag" style="display:none"></rect>
+          <g id="fv-probe" class="fv-probe" style="display:none"><circle class="ring" r="10"></circle><circle class="dot" r="3"></circle></g>
+        </svg>
+        <div class="fv-empty" id="fv-empty">Noch kein Kamerabild</div>
+        <div class="fv-mode" id="fv-mode" hidden>Rahmen um die Karte ziehen · Esc bricht ab</div>
+      </div>
+      <div class="fv-hint">Klick auf eine übersehene Karte = dort genauer suchen · Ziehen = Rahmen um die Karte</div>
+    </div>
+  </section>
   <section id="sec-confirm" hidden>
     <h2>Bitte bestätigen <span class="count" id="cnt-confirm">0</span></h2>
     <div class="grid grid-confirm" id="grid-confirm"></div>
@@ -486,12 +571,14 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     };
     hover = { key: t.key, sid: t.sid, timer: setInterval(send, HL_MS) };
     send();
+    fvSyncHl();
   }
   function hlStop(silent) {
     if (!hover) return;
     clearInterval(hover.timer);
     if (!silent) postQuiet('/api/highlight', { session: hover.sid, label: null });
     hover = null;
+    fvSyncHl();
   }
 
   // ---------- Interaktion / Einfrieren ----------
@@ -1131,11 +1218,439 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     setText(ui.emptySeen, onlyUnsure && tiles.size > 0 ? 'Keine unsicheren Karten.' :
       view.sessions === 0 ? 'Keine Quelle aktiv – Filter „TCG Card Lens“ in OBS hinzufügen.' : 'Keine Karten im Bild.');
 
+    fvUpdate(); // Vorschau steht über den Kacheln → Höhenänderungen fängt der Anker unten mit ab
+
     if (anchor && anchor.el && anchor.el.isConnected) {
       var d = anchor.el.getBoundingClientRect().top - top0;
       if (Math.abs(d) > 0.5) window.scrollBy(0, d);
     }
   }
+
+  // ---------- Kamerabild-Vorschau ----------
+  // Zeigt das Kamerabild der gewählten Quelle (ses.frame) mit den Umrissen aller Karten (ses.tracks).
+  // Hover über einen Umriss = Hover über die Kachel, Klick auf einen Umriss = Kachel zeigen,
+  // Klick auf freie Stelle = POST /api/probe {x,y}, Ziehen = POST /api/probe {rect}. Fehlt frame: ruhig bleiben.
+  var FV_LOAD_MS = 1000, FV_LOAD_TIMEOUT_MS = 5000, FV_DRAG_PX = 8, FV_MIN_RECT = 0.02, FV_FLASH_MS = 3000;
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  var fv = {
+    open: store.get('tcl.dock.frame', '1') !== '0',
+    pick: store.get('tcl.dock.framesid', ''), // Vorschau-Quelle bei „Alle Quellen“
+    sid: null, frame: null, tracks: [], ratio: 0,
+    loading: null, lastLoad: 0, hasImg: false, errs: 0,
+    els: new Map(),   // Track-Nr. (String) -> {g, poly, br, bt, tr}
+    hov: null,        // Track-Nr. unter der Maus
+    flash: null,      // {sid, track, label, until}
+    rectMode: false, drag: null, busy: false
+  };
+  var fvUi = {
+    sec: $('sec-frame'), toggle: $('fv-toggle'), body: $('fv-body'), tabs: $('fv-tabs'), src: $('fv-src'),
+    rect: $('fv-rect'), wrap: $('fv-wrap'), svg: $('fv-svg'), gTracks: $('fv-tracks'), drag: $('fv-drag'),
+    probe: $('fv-probe'), empty: $('fv-empty'), mode: $('fv-mode')
+  };
+  function svgEl(tag, cls) {
+    var e = document.createElementNS(SVGNS, tag);
+    if (cls) e.setAttribute('class', cls);
+    return e;
+  }
+  function setAttr(n, k, v) { v = String(v); if (n.getAttribute(k) !== v) n.setAttribute(k, v); }
+  function svgShow(n, on) { var d = on ? '' : 'none'; if (n.style.display !== d) n.style.display = d; }
+  function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+  function validQuad(q) {
+    return Array.isArray(q) && q.length === 4 && q.every(function (p) {
+      return Array.isArray(p) && p.length >= 2 && isFinite(p[0]) && isFinite(p[1]) &&
+        typeof p[0] === 'number' && typeof p[1] === 'number';
+    });
+  }
+
+  function fvSessions() {
+    return (state && Array.isArray(state.sessions) ? state.sessions : []).filter(function (x) { return x && x.id != null; });
+  }
+  function fvSession() {
+    var list = fvSessions(), pick = function (id) { return list.filter(function (x) { return x.id === id; })[0]; };
+    if (!list.length) return null;
+    if (view.active) return pick(selSession) || list[0];
+    return pick(fv.pick) || list.filter(function (x) { return x.frame && x.frame.url; })[0] || list[0];
+  }
+
+  function fvSetOpen(on) {
+    fv.open = !!on;
+    store.set('tcl.dock.frame', fv.open ? '1' : '0');
+    fvUi.toggle.setAttribute('aria-expanded', fv.open ? 'true' : 'false');
+    show(fvUi.body, fv.open);
+    if (!fv.open) { fvCancelDrag(); fvSetRectMode(false); fvHoverEnd(); }
+    fvUpdate();
+    fvTick();
+  }
+  function fvSetRectMode(on) {
+    on = !!on && !!fv.frame;
+    fv.rectMode = on;
+    fvUi.rect.setAttribute('aria-pressed', on ? 'true' : 'false');
+    show(fvUi.mode, on);
+  }
+
+  // Wird nach jedem layout() aufgerufen (und bei Größenänderung) – wirft nie.
+  function fvUpdate() {
+    try { fvUpdateInner(); } catch (e) { if (window.console) console.error(e); }
+  }
+  function fvUpdateInner() {
+    var ses = fvSession(), sid = ses ? ses.id : null;
+    if (sid !== fv.sid) {
+      fv.sid = sid;
+      fvDropImage();
+      fvCancelDrag();
+      fvSetRectMode(false);
+      if (fv.hov) fvHoverEnd();
+      fv.els.forEach(function (e) { e.g.remove(); });
+      fv.els.clear();
+    }
+    var fr = ses && ses.frame;
+    var ok = !!(fr && typeof fr.url === 'string' && fr.url && fr.w > 0 && fr.h > 0);
+    fv.frame = ok ? fr : null;
+    fv.tracks = ok && Array.isArray(ses.tracks) ? ses.tracks : [];
+    if (!ok) { fvDropImage(); if (fv.rectMode) fvSetRectMode(false); if (fv.drag) fvCancelDrag(); }
+    fvUi.rect.disabled = !ok;
+    setText(fvUi.src, view.multi || !ses ? '' : (ses.source || ''));
+    fvTabs();
+    if (ok) {
+      var ratio = fr.w / fr.h;
+      if (Math.abs(ratio - fv.ratio) > 1e-3) { fv.ratio = ratio; fvUi.wrap.style.aspectRatio = fr.w + ' / ' + fr.h; }
+    }
+    fvEmpty();
+    if (fv.open) fvRender();
+  }
+
+  // Quellen-Wahl in der Vorschau, nur bei „Alle Quellen“ mit mehreren Quellen
+  function fvTabs() {
+    var list = view.multi ? fvSessions() : [];
+    var sig = list.map(function (x) { return x.id + '\u0001' + (x.source || ''); }).join('\u0002') + '|' + fv.sid;
+    if (sig === fvUi.tabs._sig) return;
+    fvUi.tabs._sig = sig;
+    fvUi.tabs.textContent = '';
+    list.forEach(function (x) {
+      var b = el('button', 'btn sm', x.source || x.id);
+      b.type = 'button';
+      b.title = 'Kamerabild von „' + (x.source || x.id) + '“ zeigen';
+      b.setAttribute('aria-pressed', x.id === fv.sid ? 'true' : 'false');
+      b.addEventListener('click', function () {
+        fv.pick = x.id;
+        store.set('tcl.dock.framesid', x.id);
+        fvUpdate();
+        fvTick(true);
+      });
+      fvUi.tabs.appendChild(b);
+    });
+    show(fvUi.tabs, list.length > 1);
+  }
+
+  function fvEmpty() {
+    var msg = !fv.frame || (!fv.hasImg && fv.errs >= 2) ? 'Noch kein Kamerabild' :
+      !fv.hasImg ? 'Kamerabild wird geladen …' : '';
+    setText(fvUi.empty, msg);
+    show(fvUi.empty, !!msg);
+  }
+  function fvDropImage() {
+    if (fv.loading) { fv.loading.onload = fv.loading.onerror = null; fv.loading = null; }
+    Array.prototype.slice.call(fvUi.wrap.querySelectorAll('img.fv-img')).forEach(function (n) { n.remove(); });
+    fv.hasImg = false;
+    fv.errs = 0;
+    fv.lastLoad = 0;
+  }
+  function fvWidth() {
+    var cw = fvUi.wrap.clientWidth || 320, dpr = window.devicePixelRatio || 1;
+    return Math.max(80, Math.min(640, Math.round(cw * dpr / 40) * 40));
+  }
+  // Bild etwa 1×/s neu laden: vorladen, dann das <img> tauschen (kein Flackern). Nur offen + sichtbar.
+  function fvTick(force) {
+    try {
+      if (!fv.open || !fv.frame || document.visibilityState === 'hidden') return;
+      var now = Date.now();
+      if (fv.loading) {
+        if (now - fv.loading._at < FV_LOAD_TIMEOUT_MS) return;
+        fv.loading.onload = fv.loading.onerror = null; // hängt – aufgeben
+        fv.loading = null;
+      }
+      if (!force && now - fv.lastLoad < FV_LOAD_MS) return;
+      var u = fv.frame.url, sid = fv.sid;
+      var url = u + (u.indexOf('?') < 0 ? '?' : '&') + 'w=' + fvWidth() + '&t=' + now;
+      var img = new Image();
+      img._at = now;
+      img.className = 'fv-img';
+      img.alt = '';
+      img.draggable = false;
+      img.decoding = 'async';
+      fv.loading = img;
+      fv.lastLoad = now;
+      var done = function (ok) {
+        if (fv.loading !== img) return;
+        fv.loading = null;
+        if (sid !== fv.sid || !fv.frame) return;
+        if (ok) {
+          fvUi.wrap.insertBefore(img, fvUi.svg);
+          Array.prototype.slice.call(fvUi.wrap.querySelectorAll('img.fv-img')).forEach(function (n) {
+            if (n !== img) n.remove();
+          });
+          fv.hasImg = true;
+          fv.errs = 0;
+        } else if (++fv.errs >= 2) {
+          Array.prototype.slice.call(fvUi.wrap.querySelectorAll('img.fv-img')).forEach(function (n) { n.remove(); });
+          fv.hasImg = false;
+        }
+        fvEmpty();
+      };
+      img.onload = function () {
+        if (img.decode) img.decode().then(function () { done(true); }, function () { done(true); });
+        else done(true);
+      };
+      img.onerror = function () { done(false); };
+      img.src = url;
+    } catch (e) { if (window.console) console.error(e); }
+  }
+  setInterval(fvTick, 250);
+  document.addEventListener('visibilitychange', function () { fvTick(true); });
+
+  function fvKind(tr) {
+    var st = tr.state;
+    if (st === 'failed' || st === 'rejected') return 'failed';
+    if (st === 'new' || st === 'identifying') return 'new';
+    if (tr.certain === true) return 'ok';
+    if (tr.certain === false) return 'unsure';
+    var t = tiles.get(fv.sid + '|' + tr.track), c = t && (t.latest || t.shown);
+    return st === 'identified' && !(c && (c.needs_confirmation || c.sticky)) ? 'ok' : 'unsure';
+  }
+
+  // Umrisse zeichnen (SVG in CSS-Pixeln, damit Linien und Badges unabhängig von der Bildgröße bleiben).
+  function fvRender() {
+    var W = fvUi.wrap.clientWidth, H = fvUi.wrap.clientHeight;
+    if (W > 0 && H > 0) setAttr(fvUi.svg, 'viewBox', '0 0 ' + W + ' ' + H);
+    var seen = new Set(), now = Date.now(), fl = fv.flash;
+    if (fl && now > fl.until) fl = fv.flash = null;
+    if (fv.frame && W > 0 && H > 0) {
+      fv.tracks.forEach(function (tr) {
+        if (!tr || tr.track == null || !validQuad(tr.quad)) return;
+        if (dismissed.has(fv.sid + '|' + tr.track)) return; // gerade mit ✕/„Keine Karte“ entfernt
+        var k = String(tr.track);
+        if (seen.has(k)) return;
+        seen.add(k);
+        var e = fv.els.get(k);
+        if (!e) {
+          e = { g: svgEl('g', 'trk'), poly: svgEl('polygon'), br: svgEl('rect', 'bdg-r'), bt: svgEl('text', 'bdg-t') };
+          e.br.setAttribute('rx', '3');
+          e.bt.setAttribute('text-anchor', 'middle');
+          e.bt.setAttribute('dominant-baseline', 'central');
+          e.g.appendChild(e.poly); e.g.appendChild(e.br); e.g.appendChild(e.bt);
+          e.g.setAttribute('data-track', k);
+          e.g.addEventListener('pointerenter', function () { if (!fv.drag && !fv.rectMode) fvHoverTrack(k); });
+          e.g.addEventListener('pointerleave', function () { if (fv.hov === k) fvHoverEnd(); });
+          fv.els.set(k, e);
+          fvUi.gTracks.appendChild(e.g);
+        }
+        e.tr = tr;
+        var pts = tr.quad.map(function (p) { return (clamp01(p[0]) * W).toFixed(1) + ',' + (clamp01(p[1]) * H).toFixed(1); });
+        setAttr(e.poly, 'points', pts.join(' '));
+        var lab = String(tr.label || '?');
+        var bw = 8 + 7 * lab.length, bh = 16;
+        var cx = Math.max(bw / 2, Math.min(W - bw / 2, clamp01(tr.quad[0][0]) * W));
+        var cy = Math.max(bh / 2, Math.min(H - bh / 2, clamp01(tr.quad[0][1]) * H));
+        setAttr(e.br, 'x', (cx - bw / 2).toFixed(1)); setAttr(e.br, 'y', (cy - bh / 2).toFixed(1));
+        setAttr(e.br, 'width', bw); setAttr(e.br, 'height', bh);
+        setAttr(e.bt, 'x', cx.toFixed(1)); setAttr(e.bt, 'y', (cy + 0.5).toFixed(1));
+        setText(e.bt, lab);
+        var flash = !!fl && fl.sid === fv.sid && (fl.track === k || (fl.track == null && fl.label === tr.label));
+        setAttr(e.g, 'class', 'trk ' + fvKind(tr) + (flash ? ' flash' : '') + (e.hl ? ' hov' : ''));
+      });
+    }
+    fv.els.forEach(function (e, k) {
+      if (seen.has(k)) return;
+      e.g.remove();
+      fv.els.delete(k);
+      if (fv.hov === k) fvHoverEnd();
+    });
+    fvSyncHl();
+    if (fv.drag && fv.drag.moved) fvDrawDrag(fv.drag);
+  }
+  if (typeof ResizeObserver === 'function') {
+    new ResizeObserver(function () { if (fv.open) fvUpdate(); }).observe(fvUi.wrap);
+  } else window.addEventListener('resize', function () { if (fv.open) fvUpdate(); });
+
+  // Hervorhebung Umriss ↔ Kachel (Hover im Dock oder von der Engine gemeldet)
+  function fvHoverTrackNo() {
+    if (!hover || hover.sid !== fv.sid) return null;
+    var parts = String(hover.key).split('|');
+    return parts[parts.length - 1];
+  }
+  function fvSyncHl() {
+    if (typeof fv === 'undefined' || !fv) return;
+    var hk = fvHoverTrackNo();
+    var ses = fvSession(), engineHl = ses && ses.id === fv.sid ? ses.highlight : null;
+    fv.els.forEach(function (e, k) {
+      var on = k === hk || (!!engineHl && !!e.tr && e.tr.label === engineHl);
+      if (on === !!e.hl) return;
+      e.hl = on;
+      e.g.classList.toggle('hov', on);
+      // nach oben, damit der Umriss nicht verdeckt ist (nicht unter der Maus umhängen – sonst Hover-Flackern)
+      if (on && k !== fv.hov && e.g.parentNode && e.g.parentNode.lastChild !== e.g) e.g.parentNode.appendChild(e.g);
+    });
+    tiles.forEach(function (t) {
+      if (t.el) cls(t.el, 'fvhl', !!fv.hov && t.sid === fv.sid && String(t.track) === fv.hov);
+    });
+  }
+  function fvHoverTrack(k) {
+    var e = fv.els.get(k);
+    if (!e || !fv.sid) return;
+    fv.hov = k;
+    var t = tiles.get(fv.sid + '|' + k);
+    // Ohne Kachel (noch nicht im Dock) mit einem Ersatzobjekt hervorheben
+    hlStart(t || { key: 'fv|' + fv.sid + '|' + k, sid: fv.sid, latest: { label: e.tr && e.tr.label } });
+    fvSyncHl();
+  }
+  function fvHoverEnd() {
+    var k = fv.hov;
+    fv.hov = null;
+    if (k != null && hover && hover.sid === fv.sid &&
+        (hover.key === fv.sid + '|' + k || hover.key === 'fv|' + fv.sid + '|' + k)) {
+      var t = tiles.get(hover.key);
+      // Kachel hat den Fokus → ihre Hervorhebung bleibt
+      if (!(t && t.el && t.el.contains(document.activeElement))) hlStop();
+    }
+    fvSyncHl();
+  }
+
+  // Klick auf einen Umriss: Kachel ins Bild holen und kurz aufleuchten lassen
+  function fvFocusTile(k) {
+    var e = fv.els.get(k), lab = e && e.tr ? e.tr.label : k;
+    var t = tiles.get(fv.sid + '|' + k);
+    if (!t || !t.el || !t.el.isConnected || !t.visible) {
+      toast(onlyUnsure && t ? 'Karte ' + lab + ' ist ausgeblendet („nur unsichere“).' :
+        'Karte ' + lab + ' steht noch nicht im Dock.', 'ok');
+      return;
+    }
+    try { t.el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (x) { t.el.scrollIntoView(); }
+    t.el.classList.remove('flash');
+    void t.el.offsetWidth; // Animation neu starten
+    t.el.classList.add('flash');
+    clearTimeout(t.flashTimer);
+    t.flashTimer = setTimeout(function () { if (t.el) t.el.classList.remove('flash'); }, 1300);
+  }
+
+  // ---------- Klick / Rahmen ziehen (Pointer Events: Maus, Touch, Stift) ----------
+  function fvPos(ev) {
+    var r = fvUi.wrap.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(r.width, ev.clientX - r.left)),
+      y: Math.max(0, Math.min(r.height, ev.clientY - r.top)), W: r.width, H: r.height
+    };
+  }
+  function fvDrawDrag(d) {
+    var x = Math.min(d.x0, d.x), y = Math.min(d.y0, d.y);
+    setAttr(fvUi.drag, 'x', x.toFixed(1)); setAttr(fvUi.drag, 'y', y.toFixed(1));
+    setAttr(fvUi.drag, 'width', Math.abs(d.x - d.x0).toFixed(1));
+    setAttr(fvUi.drag, 'height', Math.abs(d.y - d.y0).toFixed(1));
+    svgShow(fvUi.drag, true);
+  }
+  function fvCancelDrag() {
+    var d = fv.drag;
+    fv.drag = null;
+    if (d) { try { fvUi.wrap.releasePointerCapture(d.id); } catch (e) { /* egal */ } }
+    if (!fv.busy) svgShow(fvUi.drag, false);
+  }
+  fvUi.wrap.addEventListener('pointerdown', function (ev) {
+    if (!fv.frame) return;
+    if (ev.pointerType === 'mouse' && ev.button !== 0) return;
+    if (fv.drag) fvCancelDrag(); // verpasstes Loslassen (z. B. außerhalb des Docks)
+    if (fv.busy) { toast('Suche läuft noch …', 'ok'); return; }
+    var p = fvPos(ev);
+    var g = ev.target && ev.target.closest ? ev.target.closest('.trk') : null;
+    fv.drag = { id: ev.pointerId, x0: p.x, y0: p.y, x: p.x, y: p.y, W: p.W, H: p.H, moved: false,
+      track: g ? g.getAttribute('data-track') : null };
+    ev.preventDefault();
+  });
+  // Bewegen/Loslassen am Fenster abhören; erst beim echten Ziehen den Zeiger einfangen
+  // (sonst meldet ein einfacher Klick auf einen Umriss kurz „Maus verlassen“).
+  window.addEventListener('pointermove', function (ev) {
+    var d = fv.drag;
+    if (!d || ev.pointerId !== d.id) return;
+    var p = fvPos(ev);
+    d.x = p.x; d.y = p.y;
+    if (!d.moved && Math.hypot(d.x - d.x0, d.y - d.y0) > FV_DRAG_PX) {
+      d.moved = true;
+      if (fv.hov) fvHoverEnd();
+      try { fvUi.wrap.setPointerCapture(d.id); } catch (e) { /* egal */ }
+    }
+    if (d.moved) fvDrawDrag(d);
+  });
+  window.addEventListener('pointerup', function (ev) {
+    var d = fv.drag;
+    if (!d || ev.pointerId !== d.id) return;
+    fv.drag = null;
+    try { fvUi.wrap.releasePointerCapture(d.id); } catch (e) { /* egal */ }
+    if (d.moved) { fvProbeRect(d); return; }
+    svgShow(fvUi.drag, false);
+    if (fv.rectMode) { toast('Maustaste gedrückt halten und einen Rahmen um die Karte ziehen.', 'ok'); return; }
+    if (d.track) { fvFocusTile(d.track); return; }
+    fvProbePoint(d);
+  });
+  window.addEventListener('pointercancel', function (ev) { if (fv.drag && ev.pointerId === fv.drag.id) fvCancelDrag(); });
+  fvUi.wrap.addEventListener('dragstart', function (ev) { ev.preventDefault(); });
+  fvUi.wrap.addEventListener('contextmenu', function (ev) { if (fv.drag) ev.preventDefault(); });
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key !== 'Escape' || !(fv.drag || fv.rectMode)) return;
+    fvCancelDrag();
+    fvSetRectMode(false);
+  });
+  fvUi.rect.addEventListener('click', function () { fvSetRectMode(!fv.rectMode); });
+  fvUi.toggle.addEventListener('click', function () { fvSetOpen(!fv.open); });
+
+  function fvProbePoint(d) {
+    var x = clamp01(d.x / d.W), y = clamp01(d.y / d.H);
+    fvUi.probe.setAttribute('transform', 'translate(' + d.x.toFixed(1) + ' ' + d.y.toFixed(1) + ')');
+    svgShow(fvUi.probe, true);
+    fvProbe({ session: fv.sid, x: +x.toFixed(4), y: +y.toFixed(4) }, 'point');
+  }
+  function fvProbeRect(d) {
+    var x0 = clamp01(Math.min(d.x0, d.x) / d.W), x1 = clamp01(Math.max(d.x0, d.x) / d.W);
+    var y0 = clamp01(Math.min(d.y0, d.y) / d.H), y1 = clamp01(Math.max(d.y0, d.y) / d.H);
+    // Mindestgröße: 2 % der Bildbreite in beiden Richtungen
+    if (x1 - x0 < FV_MIN_RECT || (y1 - y0) * d.H < FV_MIN_RECT * d.W) {
+      svgShow(fvUi.drag, false);
+      toast('Rahmen zu klein – bitte größer um die Karte ziehen.');
+      return;
+    }
+    fvSetRectMode(false);
+    fvProbe({ session: fv.sid, rect: [x0, y0, x1, y1].map(function (v) { return +v.toFixed(4); }) }, 'rect');
+  }
+  function fvProbe(body, kind) {
+    var sid = fv.sid;
+    fv.busy = true;
+    fvUi.wrap.classList.add('busy');
+    fvUi.drag.classList.add('busy');
+    post('/api/probe', body).then(function (res) {
+      if (res.found) {
+        var lab = res.label || '?';
+        toast(res.how === 'vorhanden' ? 'Karte ' + lab + ' liegt dort schon – wird neu erkannt.' :
+          'Karte gefunden: ' + lab, 'ok');
+        fv.flash = { sid: sid, track: res.track != null ? String(res.track) : null, label: res.label,
+          until: Date.now() + FV_FLASH_MS };
+        setTimeout(function () { if (fv.open) fvRender(); }, FV_FLASH_MS + 50);
+        fvSetRectMode(false);
+      } else {
+        toast(res.error || 'Keine Karte gefunden – Rahmen um die Karte ziehen');
+        if (sid === fv.sid) fvSetRectMode(true); // Rahmen-Modus anbieten
+      }
+    }, function (err) {
+      toast('Fehler: ' + (err && err.message ? err.message : 'Suche fehlgeschlagen'));
+    }).then(function () {
+      fv.busy = false;
+      fvUi.wrap.classList.remove('busy');
+      fvUi.drag.classList.remove('busy');
+      svgShow(fvUi.probe, false);
+      if (!fv.drag) svgShow(fvUi.drag, false);
+      pollNow();
+    });
+  }
+
+  fvUi.toggle.setAttribute('aria-expanded', fv.open ? 'true' : 'false');
+  show(fvUi.body, fv.open);
+  fvUpdate();
 
   window.addEventListener('beforeunload', function () { if (hover) hlStop(); });
   poll();
