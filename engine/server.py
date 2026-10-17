@@ -386,7 +386,8 @@ class Session:
     def _result(self, seq: int, tracks, shape) -> dict:
         st = self.settings
         out = []
-        self._prune_labels({t.id for t in self.pipeline.tracker.tracks if t.state != "rejected"})
+        # Kennzeichen erst freigeben, wenn der Track ganz weg ist (auch verworfene Karten können im Dock noch stehen)
+        self._prune_labels({t.id for t in self.pipeline.tracker.tracks})
         hl = self.current_highlight()
         show_labels = self._labels_visible()
         for t in tracks:
