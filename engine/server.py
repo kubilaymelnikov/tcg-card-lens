@@ -243,6 +243,11 @@ class Session:
     def _localize(self, identity) -> None:
         cat = self.shared.identifier.catalog if self.shared.identifier else None
         rec = cat.get(identity.game, identity.card_id) if (cat and identity.card_id) else None
+        if rec is None and cat and identity.candidates:
+            # Druck unsicher, Name bekannt (z. B. Yu-Gi-Oh ohne lesbaren Set-Code): Name eines Kandidaten gleichen Namens
+            game, cid = identity.candidates[0].split("|", 1) if "|" in identity.candidates[0] else (identity.game, identity.candidates[0])
+            cand = cat.get(game, cid)
+            rec = cand if cand is not None and cand.name == identity.name else None
         identity.display_name = self.shared.names.name(rec, self.settings["display_language"]) if rec else identity.name
 
     def ensure_pipeline(self) -> bool:

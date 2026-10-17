@@ -20,6 +20,7 @@ Getestet: Python 3.12.10, PyTorch 2.14.1+cu130 (sm_75 enthalten), ONNX Runtime 1
 ```powershell
 .\.venv\Scripts\python.exe -m cardengine.card_database.build pokemon              # ~22k Karten, ~0,7 GB
 .\.venv\Scripts\python.exe -m cardengine.card_database.build mtg --all-images     # ~104k Drucke, dauert Stunden
+.\.venv\Scripts\python.exe -m cardengine.maintenance --ygo                       # Yu-Gi-Oh: ~45k Drucke, ~15k Bilder (~1,2 GB), Index
 .\.venv\Scripts\python.exe -m cardengine.recognition.index                        # Embedding-Index (GPU, ~5 min je 30k Bilder)
 ```
 
@@ -45,6 +46,7 @@ Tasten: `s` Bild speichern, `d` Roh-Detektionen ein/aus, `q` Ende. Optionen: `--
 ```powershell
 .\.venv\Scripts\python.exe tools\eval_identify.py --game pokemon --n 400            # Embedding-Genauigkeit
 .\.venv\Scripts\python.exe tools\eval_identify.py --pipeline --game pokemon --n 300 # inkl. Unsicherheitslogik
+.\.venv\Scripts\python.exe tools\eval_ygo.py --snapshots data\ygo-test --n 200   # Yu-Gi-Oh (docs/YUGIOH.md)
 .\.venv\Scripts\python.exe tools\eval_detect.py --n 150 --images data\frames       # Detektoren vergleichen
 .\.venv\Scripts\python.exe -m pytest                                               # Unit-Tests
 ```

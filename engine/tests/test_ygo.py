@@ -6,7 +6,7 @@ import numpy as np
 from cardengine.card_database.catalog import IMG_DIR, CardRecord, Catalog, image_path
 from cardengine.card_database.ygo import cardmarket_products, records_from_api
 from cardengine.games import parse_games
-from cardengine.recognition.footer import parse_ygo_codes, ygo_code_key
+from cardengine.recognition.footer import parse_ygo_codes, ygo_code_key, ygo_match_codes
 from cardengine.recognition.identifier import CardIdentifier
 from cardengine.recognition.index import EmbeddingIndex
 
@@ -31,6 +31,18 @@ def test_parse_ygo_codes_ocr_variants():
     assert parse_ygo_codes("YGLD-DEC32") == ["YGLD-C32"]
     assert parse_ygo_codes("ATK/3000 DEF/2500") == []
     assert parse_ygo_codes("") == []
+
+
+def test_ygo_match_codes_tolerant_but_specific():
+    codes = ["LCYW-EN078", "PP01-EN002", "YGLD-ENC32", "LOB-EN001", "LOB-E001"]
+    assert ygo_match_codes("LCYW-DE078", codes) == {"LCYW-078"}
+    assert ygo_match_codes("1CYW-DEO7B", codes) == {"LCYW-078"}  # L→1, O→0, B→8
+    assert ygo_match_codes("LCYW DE078", codes) == {"LCYW-078"}  # ohne Bindestrich
+    assert ygo_match_codes("YGLD-DEC32", codes) == {"YGLD-C32"}
+    assert ygo_match_codes("LOB-G001", codes) == {"L0B-001"}  # beide LOB-Codes haben denselben Schlüssel
+    assert ygo_match_codes("LCYW-DE079", codes) == set()
+    assert ygo_match_codes("LCYW-DE0781", codes) == set()  # längere Nummer
+    assert ygo_match_codes("Monster from your hand", codes) == set()
 
 
 # ---------------------------------------------------------------- Katalog
@@ -180,7 +192,7 @@ class FakeOcr:
         self.text = text
         self.calls = 0
 
-    def read_set_code(self, card):
+    def read_set_code(self, card, stop=None):
         self.calls += 1
         return self.text
 
@@ -244,3 +256,9 @@ def test_ygo_single_print_without_ocr_text(tmp_path):
     ident, _ = make_ygo(tmp_path, unit(2), "")
     res = ident.identify(FRAME, CORNERS, game="ygo")
     assert res.certain and res.card_id == "22222222-PRO-EN001-C" and res.method == "embedding"
+
+
+def test_ygo_asian_print_is_uncertain(tmp_path):
+    ident, _ = make_ygo(tmp_path, unit(0), "LCYW-JP078")
+    res = ident.identify(FRAME, CORNERS, game="ygo")
+    assert not res.certain and res.card_id is None and "Asien" in res.reason

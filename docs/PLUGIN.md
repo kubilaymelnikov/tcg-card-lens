@@ -55,7 +55,7 @@ hält eine Textur je `key` vor. Positionen berechnet das Plugin pro Frame aus de
 | Gruppe | Einstellung | Wirkung |
 |---|---|---|
 | Allgemein | Erkennung aktiv | Filter sendet keine Frames, wenn aus |
-| | Kartenspiele: Pokémon / Magic / beide | Suche nur im gewählten Katalog |
+| | Kartenspiele: Pokémon / Magic / Yu-Gi-Oh! (je eine Checkbox) | Suche nur in den gewählten Katalogen; an die Engine als `games` = Kommaliste (`"pokemon,mtg"`), alte Werte `both`/`pokemon`/`mtg` bleiben gültig, `all` = alle (siehe `cardengine/games.py`, `docs/YUGIOH.md`) |
 | | Modus: Facecam / Tischkamera | Tracking-Profil (schnelle Bewegung vs. viele ruhende Karten) |
 | | Erkennungsempfindlichkeit | Schwelle des Detektors |
 | | Haltezeit bei Verlust (s), Glättung | Tracking-Verhalten |
@@ -64,7 +64,7 @@ hält eine Textur je `key` vor. Positionen berechnet das Plugin pro Frame aus de
 | | Anzeigesprache | Sprache des Namens im Overlay (Fallback Englisch) |
 | Overlay | Kartenname / Preis / Preisverlauf anzeigen | |
 | | Zeitraum Preisverlauf (30/90/180 Tage) | |
-| | Skalierung, Rahmenstärke, Farbe Pokémon, Farbe Magic | |
+| | Skalierung, Rahmenstärke, Farbe Pokémon, Farbe Magic, Farbe Yu-Gi-Oh | |
 | Debug | Debug-Anzeige | Roh-Detektionen, Track-Status, Messwerte |
 | | Snapshot jetzt (Button) | speichert Bild + Erkennungsdaten |
 | | Automatische Snapshots, Speicherlimit (MB) | Engine speichert auffällige Situationen (unsicher, fehlgeschlagen, Kartentausch), älteste werden bei Überschreiten gelöscht |

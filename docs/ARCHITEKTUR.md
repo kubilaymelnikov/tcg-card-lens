@@ -146,6 +146,8 @@ Der bisherige Web-Prototyp (`server/`, `public/`) bleibt als Referenz erhalten. 
 ### Phase 2 – Kartendaten & Preise
 Vollständige Kataloge (Magic ~100k Drucke, Pokémon ~20k), Varianten/Foil, Cardmarket-Preisdatei + Snapshots,
 MTGJSON-Historie, Preis-Overlay mit Verlauf.
+Yu-Gi-Oh! (`ygo`, ~45k Drucke, YGOPRODeck + Cardmarket `price_guide_3`): Druck nur über den Set-Code – siehe
+[YUGIOH.md](YUGIOH.md).
 
 ### Phase 3 – OBS-Plugin
 Plugin-Template, Frame-Readback-Ring, IPC zur Engine (Shared Memory), Overlay-Rendering in C++, Einstellungen,

@@ -17,7 +17,7 @@ import numpy as np
 
 from ..card_database.catalog import Catalog, CardRecord
 from ..geometry import RECT_H, RECT_W, rectify
-from .footer import FooterInfo, matches, parse_footer, parse_ygo_codes, ygo_code_key
+from .footer import FooterInfo, matches, parse_footer, parse_ygo_codes, ygo_asian_print, ygo_code_key, ygo_match_codes
 from .index import EmbeddingIndex
 
 if TYPE_CHECKING:
@@ -240,13 +240,17 @@ class CardIdentifier:
                                               if s >= max(self.t.min_similarity, best_sim - self.t.name_margin)][:3]
         prints = [r for n in names for r in self.catalog.by_name("ygo", n) if r.set_code]
 
-        keys: list[str] = []
+        codes = [r.printed_number for r in prints]
+        found: set[str] = set()
         if self.ocr is not None and prints:
             card = rectify(frame, corners, turns=turns, margin=0.03)
-            read = getattr(self.ocr, "read_set_code", None) or self.ocr.read_footer
-            ident.footer_text = read(card)
-            keys = parse_ygo_codes(ident.footer_text)
-        matched = [r for r in prints if ygo_code_key(r.printed_number) in keys]
+            if hasattr(self.ocr, "read_set_code"):
+                ident.footer_text = self.ocr.read_set_code(card, stop=lambda t: bool(ygo_match_codes(t, codes)))
+            else:
+                ident.footer_text = self.ocr.read_footer(card)
+            found = ygo_match_codes(ident.footer_text, codes)
+        keys = parse_ygo_codes(ident.footer_text)  # irgendein Set-Code gelesen (auch fremder)?
+        matched = [r for r in prints if ygo_code_key(r.printed_number) in found]
 
         def take(r: CardRecord, method: str) -> Identity:
             ident.card_id, ident.name, ident.set_code = r.id, r.name, r.set_code
@@ -254,9 +258,17 @@ class CardIdentifier:
             ident.similarity = name_sim.get(r.name, best_sim)
             return ident
 
+        if matched and ygo_asian_print(ident.footer_text):
+            ident.reason = "OCG-/Asien-Druck (kein TCG-Preis)"
+            ident.candidates = [f"ygo|{r.id}" for r in matched][:MAX_CANDIDATES]
+            return ident
         if matched:
             if len({r.name for r in matched}) > 1:
                 ident.reason = "Set-Code passt zu mehreren Karten"
+                ident.candidates = [f"ygo|{r.id}" for r in matched][:MAX_CANDIDATES]
+                return ident
+            if len(found) > 1:
+                ident.reason = "Set-Code nicht eindeutig gelesen"
                 ident.candidates = [f"ygo|{r.id}" for r in matched][:MAX_CANDIDATES]
                 return ident
             if len(matched) == 1:

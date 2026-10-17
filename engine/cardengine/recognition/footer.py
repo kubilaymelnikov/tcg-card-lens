@@ -95,3 +95,35 @@ def parse_ygo_codes(text: str) -> list[str]:
         if key and key not in out:
             out.append(key)
     return out
+
+
+# OCR-Verwechslungen bei der kleinen Set-Code-Schrift; auf Text und Katalogcode gleich angewendet
+_CONFUSABLE = str.maketrans({"O": "0", "Q": "0", "D": "0", "I": "1", "L": "1", "J": "1", "B": "8", "Z": "2",
+                             "S": "5", "G": "6"})
+
+
+def _canon(s: str) -> str:
+    return re.sub(r"[^A-Z0-9]", "", s.upper()).translate(_CONFUSABLE)
+
+
+def ygo_match_codes(text: str, codes: list[str]) -> set[str]:
+    """Welche der Katalogcodes (`codes`, z. B. "LCYW-EN078") stehen im OCR-Text? Liefert ihre Schlüssel
+    (`ygo_code_key`). Tolerant gegenüber Region (EN/DE/G …), fehlendem Bindestrich und typischen Verwechslungen –
+    vertretbar, weil nur die wenigen Drucke der bereits erkannten Karte verglichen werden."""
+    lines = [_canon(line) for line in text.splitlines() if line.strip()]
+    out: set[str] = set()
+    for code in codes:
+        key = ygo_code_key(code)
+        if not key or "-" not in code:
+            continue
+        prefix = code.split("-", 1)[0]
+        num = key.split("-", 1)[1]
+        pat = re.compile(re.escape(_canon(prefix)) + r"[A-Z0-9]{0,2}" + re.escape(_canon(num)) + r"(?![0-9])")
+        if any(pat.search(line) for line in lines):
+            out.add(key)
+    return out
+
+
+def ygo_asian_print(text: str) -> bool:
+    """Set-Code einer OCG-/Asien-Ausgabe ("-JP001", "-KR001", "-AE001")? Deren Preise sind nicht die des TCG-Drucks."""
+    return bool(re.search(r"[A-Z0-9]{2,5} ?[-‐‑–—_~.] ?(JP|JA|KR|AE)[0-9OIL]{2,4}", text.upper()))
