@@ -1,7 +1,8 @@
 ﻿# Richtet die TCG-Card-Lens-Engine ein (wird vom Installer aufgerufen, kann auch erneut ausgeführt werden).
 #   1. Python 3.12 finden oder für den aktuellen Benutzer installieren
 #   2. Virtuelle Umgebung + Pakete: schlank ohne PyTorch (ONNX Runtime passend zur GPU, ~0,4–2 GB statt ~4 GB)
-#        NVIDIA -> onnxruntime-gpu (CUDA + cuDNN als Pip-Pakete), AMD/Intel -> onnxruntime-directml, sonst CPU
+#        Standard: onnxruntime-directml für jede GPU (NVIDIA/AMD/Intel, ~0,4 GB); ohne GPU CPU.
+#        CUDA (onnxruntime-gpu + CUDA/cuDNN als Pip-Pakete, ~2,1 GB) nur auf Wunsch: -Runtime cuda
 #      -Dev: zusätzlich PyTorch, Ultralytics, Transformers (Training, ONNX-Export, PyTorch-Backend)
 #   3. Modelle laden (ONNX-Modelle vom GitHub-Release, mit SHA256-Prüfung)
 #   4. Auswahl speichern (data\config.json: Spiele, Namenssprachen, Paket-Adresse)
@@ -10,7 +11,7 @@
 #
 #   setup-engine.ps1 -Games pokemon,mtg -Languages de,en [-PackDir D:\packs] [-PackUrl https://…] [-SkipData] [-UiLang de|en]
 #                    [-Runtime auto|cuda|directml|cpu] [-Dev]
-#   -Runtime directml geht auch mit NVIDIA-GPUs (kleinste Installation, ~0,4 GB); auto wählt nach der GPU.
+#   -Runtime auto = DirectML bei jeder GPU (auf der RTX 2080 SUPER sogar schneller als CUDA), sonst CPU.
 #   Ohne -Dev werden PyTorch-Pakete einer älteren Installation entfernt (spart ~3 GB) – im Entwicklungs-Checkout
 #   daher immer mit -Dev aufrufen.
 #   Ohne -Games/-Languages bleibt die bisherige Auswahl (bzw. Standard: Pokémon + Magic, Deutsch + Englisch).
@@ -65,7 +66,8 @@ $nvidia = [bool]($gpuNames | Where-Object { $_ -match "NVIDIA" })
 $dxGpu = [bool]($gpuNames | Where-Object { $_ -match "AMD|Radeon|Intel.*(Arc|Iris|UHD|HD Graphics)|Qualcomm|Adreno" })
 if ($gpuNames) { Write-Host ((L "Gefunden: " "Found: ") + ($gpuNames -join ", ")) }
 if ($Runtime -eq "auto") {
-    if ($nvidia) { $Runtime = "cuda" } elseif ($dxGpu) { $Runtime = "directml" } else { $Runtime = "cpu" }
+    # DirectML für alle GPUs: kleinste Installation und gemessen schneller als CUDA (docs/ARCHITEKTUR.md, Abschnitt 7)
+    if ($nvidia -or $dxGpu) { $Runtime = "directml" } else { $Runtime = "cpu" }
 }
 # Genau ein onnxruntime-Paket: alle liefern das Modul "onnxruntime" und würden sich gegenseitig überschreiben
 $ortPackages = @{

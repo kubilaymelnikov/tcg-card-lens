@@ -3,7 +3,7 @@
 **Deutsch** · [English](README.en.md)
 
 **OBS-Plugin, das Sammelkarten im Kamerabild erkennt und ihren Cardmarket-Preis einblendet** – für
-**Pokémon**, **Magic: The Gathering** und **Yu-Gi-Oh!**. Läuft lokal auf deiner Grafikkarte (NVIDIA per CUDA, AMD/Intel per DirectML), ohne Cloud-Dienst.
+**Pokémon**, **Magic: The Gathering** und **Yu-Gi-Oh!**. Läuft lokal auf deiner Grafikkarte (NVIDIA, AMD oder Intel per DirectML), ohne Cloud-Dienst.
 
 - Mehrere Karten gleichzeitig, auch schräg, gedreht oder im Toploader
 - Rahmen um jede Karte, darüber der Name (auf Wunsch auf Deutsch), darunter Preis, Trend und Preisverlauf

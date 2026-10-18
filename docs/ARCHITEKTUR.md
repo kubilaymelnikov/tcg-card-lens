@@ -183,8 +183,10 @@ werden nur noch für Training, ONNX-Export und das optionale PyTorch-Backend geb
   `…/releases/latest/download`, `TCGLENS_MODEL_URL` überschreibt), prüft die fest eingetragene SHA256 und legt sie
   unter `models/onnx` ab (`TCGLENS_ONNX_DIR`). Fehlt die Quelle und ist PyTorch da, wird lokal exportiert
   (`cardengine/onnx_export.py`, Werkzeug `tools/export_onnx.py`).
-- Installation (`setup-engine.ps1`): Standard schlank; das onnxruntime-Paket nach GPU (NVIDIA → `onnxruntime-gpu[cuda,cudnn]`,
-  AMD/Intel → `onnxruntime-directml`, sonst `onnxruntime`), umstellbar mit `-Runtime cuda|directml|cpu`; `-Dev`
+- Installation (`setup-engine.ps1`): Standard schlank; **DirectML für jede GPU** (NVIDIA, AMD, Intel →
+  `onnxruntime-directml`, ~0,4 GB), ohne GPU `onnxruntime` (CPU). CUDA (`onnxruntime-gpu[cuda,cudnn]`, ~2,1 GB) nur auf
+  Wunsch mit `-Runtime cuda`. Entscheidung 2026-10-18: DirectML war auf der RTX 2080 SUPER schneller als CUDA und
+  spart 1,7 GB. Umstellbar mit `-Runtime cuda|directml|cpu`; `-Dev`
   installiert zusätzlich PyTorch & Co. Ohne `-Dev` entfernt das Setup PyTorch-Pakete einer älteren Installation.
 
 **Größe der Python-Umgebung** (Python 3.12, alle Laufzeitpakete inkl. OpenCV, RapidOCR)
@@ -196,8 +198,8 @@ werden nur noch für Training, ONNX-Export und das optionale PyTorch-Backend geb
 | ONNX + DirectML (`onnxruntime-directml` 1.24.4) | 421 MB | |
 | ONNX + CPU (`onnxruntime` 1.31) | 313 MB | |
 
-Das Ziel < 1 GB erreichen DirectML und CPU. Mit CUDA bleibt es wegen cuBLAS/cuDNN bei ~2,1 GB (−46 %); wer auf einer
-NVIDIA-Karte die kleinste Installation will, nimmt `-Runtime directml` (auf der RTX 2080 SUPER sogar schneller, s. u.).
+Das Ziel < 1 GB erreichen DirectML (Standard für alle GPUs) und CPU. CUDA bleibt wegen cuBLAS/cuDNN bei ~2,1 GB
+(−46 %) und ist nur noch auf Wunsch (`-Runtime cuda`) – auf der RTX 2080 SUPER war DirectML sogar schneller (s. u.).
 
 **Gleichwertigkeit** (`tools/compare_backends.py`, Live-Daten nur lesend)
 - Embedder, 600 Referenzbilder (je 200 Pokémon/Magic/Yu-Gi-Oh, Startwert 0), Kosinus gegen PyTorch wie im Betrieb

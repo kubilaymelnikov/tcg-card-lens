@@ -3,7 +3,7 @@
 [Deutsch](README.md) · **English**
 
 **OBS plugin that recognizes trading cards in your camera image and overlays their Cardmarket price** – for
-**Pokémon**, **Magic: The Gathering** and **Yu-Gi-Oh!**. Runs locally on your graphics card (NVIDIA via CUDA, AMD/Intel via DirectML), no cloud service.
+**Pokémon**, **Magic: The Gathering** and **Yu-Gi-Oh!**. Runs locally on your graphics card (NVIDIA, AMD or Intel via DirectML), no cloud service.
 
 - Several cards at once, also tilted, rotated or in a toploader
 - A frame around each card, the name above it (optionally in German or another card language), price, trend and
