@@ -27,6 +27,7 @@ from .card_database.catalog import Catalog
 from .config import GAMES, load_config
 from .paths import DATA_DIR
 
+DAY = 24 * 3600
 WEEK = 7 * 86400
 IMAGE_CHUNK = 1500  # Bilder je Durchgang, danach Index-Update
 
@@ -145,14 +146,27 @@ class Maintenance:
                 if r.image_url and f"{game}|{r.id}" not in indexed and not os.path.exists(r.image_path)]
 
     def images_chunk(self, games: list[str] | None = None, limit: int | None = IMAGE_CHUNK) -> int:
-        """Einen Block fehlender Bilder laden; liefert die Anzahl versuchter Bilder (0 = nichts mehr offen)."""
+        """Einen Block fehlender Bilder laden; liefert die Anzahl tatsächlich geladener Bilder (0 = nichts mehr zu tun).
+
+        Bilder, die sich nicht laden lassen (Quelle liefert 404 o. ä.), werden einen Tag lang übersprungen – sonst hielte
+        `while images_chunk(): index()` sie für Fortschritt und baute den Index endlos neu auf."""
+        now = time.time()
+        failed = self.__dict__.setdefault("_failed_images", {})
         for game in games if games is not None else self.games:
-            todo = self.images_pending(game)
+            todo = [r for r in self.images_pending(game) if now - failed.get((game, r.id), -1e12) > DAY]
             if not todo:
                 continue
             chunk = todo[:limit] if limit else todo
             download_images(chunk, 6, progress=self._progress(f"{_label(game)}-Bilder", offset_left=len(todo)))
-            return len(chunk)
+            loaded = 0
+            for r in chunk:
+                if os.path.exists(r.image_path):
+                    loaded += 1
+                else:
+                    failed[(game, r.id)] = now
+            if loaded:
+                return loaded
+            print(f"[wartung] {_label(game)}: {len(chunk)} Bilder nicht ladbar – nächster Versuch in einem Tag", flush=True)
         return 0
 
     def index(self) -> None:

@@ -23,6 +23,7 @@ from cardengine.geometry import rectify
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DOCK_HTML = os.path.join(HERE, "dock", "dock.html")
+SESSION_HTML = os.path.join(HERE, "dock", "session.html")  # Session-Anzeige (OBS-Browser-Quelle, Pack-Opening)
 CM_GAME = {"pokemon": "Pokemon", "mtg": "Magic", "ygo": "YuGiOh"}
 CM_LANGS = {"de", "en", "fr", "it", "es"}
 CROP_SIZE = (244, 340)
@@ -100,8 +101,9 @@ class DockApi:
                 "similarity": None if sim is None else round(float(sim), 3), "image": self._image_url(key)}
 
     # ---------------------------------------------------------------- Zustand
-    def state(self) -> dict:
-        self.shared.dock_seen = time.time()
+    def state(self, overlay: bool = False) -> dict:
+        if not overlay:  # Overlay-Seiten (Session-Anzeige) zählen nicht als „Dock offen“
+            self.shared.dock_seen = time.time()
         learned = self.shared.learned.counts() if self.shared.learned is not None else {}
         sessions = []
         for sess in list(self.shared.session_list):
@@ -539,7 +541,10 @@ def _handler(api: DockApi):
                     with open(DOCK_HTML, "rb") as f:
                         return self._send(200, f.read(), "text/html; charset=utf-8")
                 if url.path == "/api/state":
-                    return self._json(api.state())
+                    return self._json(api.state(overlay="overlay" in parse_qs(url.query)))
+                if url.path in ("/session", "/session.html"):
+                    with open(SESSION_HTML, "rb") as f:
+                        return self._send(200, f.read(), "text/html; charset=utf-8")
                 if url.path == "/api/search":
                     qs = parse_qs(url.query)
                     return self._json(api.search(qs.get("q", [""])[0], qs.get("game", [None])[0] or None,

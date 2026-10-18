@@ -11,6 +11,7 @@
 #endif
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <memory>
@@ -250,6 +251,60 @@ bool snapshot_clicked(obs_properties_t *, obs_property_t *, void *data)
 	return false;
 }
 
+#ifdef HAVE_FRONTEND_API
+std::string url_encode(const std::string &v)
+{
+	static const char *hex = "0123456789ABCDEF";
+	std::string out;
+	for (unsigned char c : v) {
+		if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+			out += char(c);
+		} else {
+			out += '%';
+			out += hex[c >> 4];
+			out += hex[c & 15];
+		}
+	}
+	return out;
+}
+
+// Session-Anzeige (Pack-Opening) als Browser-Quelle in die aktuelle Szene legen – frei platzierbar und skalierbar.
+// Die Seite liefert die Engine (Dock-Server, Port = Engine-Port + 10).
+bool add_session_display_clicked(obs_properties_t *, obs_property_t *, void *data)
+{
+	auto *f = static_cast<Filter *>(data);
+	obs_source_t *parent = obs_filter_get_parent(f->source);
+	const char *pname = parent ? obs_source_get_name(parent) : "";
+	obs_data_t *fs = obs_source_get_settings(f->source);
+	const long long port = obs_data_get_int(fs, "engine_port");
+	obs_data_release(fs);
+	const std::string url = "http://127.0.0.1:" + std::to_string((port > 0 ? port : 47820) + 10) +
+				"/session?source=" + url_encode(pname ? pname : "");
+	const std::string name = std::string("TCG Card Lens – Session (") + (pname ? pname : "") + ")";
+
+	obs_source_t *src = obs_get_source_by_name(name.c_str()); // schon vorhanden: nur zur Szene hinzufügen
+	if (!src) {
+		obs_data_t *bs = obs_data_create();
+		obs_data_set_string(bs, "url", url.c_str());
+		obs_data_set_int(bs, "width", 520);
+		obs_data_set_int(bs, "height", 380);
+		obs_data_set_string(bs, "css", "body { background-color: rgba(0, 0, 0, 0); margin: 0; overflow: hidden; }");
+		src = obs_source_create("browser_source", name.c_str(), bs, nullptr);
+		obs_data_release(bs);
+	}
+	obs_source_t *scene_src = obs_frontend_get_current_scene();
+	if (src && scene_src) {
+		if (obs_scene_t *scene = obs_scene_from_source(scene_src))
+			obs_scene_add(scene, src);
+	}
+	if (!src)
+		obs_log(LOG_WARNING, "Browser-Quelle konnte nicht angelegt werden (obs-browser fehlt?)");
+	obs_source_release(scene_src);
+	obs_source_release(src);
+	return false;
+}
+#endif
+
 bool pack_reset_clicked(obs_properties_t *, obs_property_t *, void *data)
 {
 	static_cast<Filter *>(data)->client->request_pack_reset();
@@ -331,8 +386,8 @@ obs_properties_t *filter_properties(void *data)
 	// Pack-Opening
 	obs_properties_t *pk = obs_properties_create();
 	obs_properties_add_bool(pk, "pack_enabled", obs_module_text("PackEnabled"));
-	obs_property_t *thr = obs_properties_add_float(pk, "pack_threshold", obs_module_text("PackThreshold"), 0.5,
-						       100000.0, 0.5);
+	obs_property_t *thr = obs_properties_add_float(pk, "pack_threshold", obs_module_text("PackThreshold"), 0.01,
+						       100000.0, 0.05);
 	obs_property_float_set_suffix(thr, " €");
 	obs_property_t *eff = obs_properties_add_list(pk, "hit_effect", obs_module_text("HitEffect"), OBS_COMBO_TYPE_LIST,
 						      OBS_COMBO_FORMAT_STRING);
@@ -369,6 +424,9 @@ obs_properties_t *filter_properties(void *data)
 	obs_property_list_add_string(snd, obs_module_text("None"), "");
 	obs_enum_sources(add_media_source, snd);
 	obs_properties_add_button(pk, "pack_reset", obs_module_text("PackReset"), pack_reset_clicked);
+#ifdef HAVE_FRONTEND_API
+	obs_properties_add_button(pk, "pack_add_display", obs_module_text("PackAddDisplay"), add_session_display_clicked);
+#endif
 	obs_properties_add_group(props, "grp_pack", obs_module_text("Group.Pack"), OBS_GROUP_NORMAL, pk);
 
 	// Debug

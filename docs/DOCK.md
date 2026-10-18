@@ -207,3 +207,14 @@ Zeit;Spiel;Karte;Set;Nummer;Variante;Preis;Währung;Hit;Schlüssel
 ```
 
 `Preis` ist leer, wenn kein Preis vorliegt; `Hit` ist `ja` oder leer.
+
+## Session-Anzeige (Pack-Opening) als eigene Szenen-Quelle
+
+`http://127.0.0.1:47830/session` – eine Seite mit transparentem Hintergrund für eine **OBS-Browser-Quelle**: Session-Wert,
+Kartenanzahl, letzte Hits und eine Hit-Animation (Banner + Leuchten). Frei in jeder Szene platzierbar, skalierbar und
+zuschneidbar. Am einfachsten über den Knopf **„Session-Anzeige zur aktuellen Szene hinzufügen“** in der Filtergruppe
+„Pack-Opening“ – der legt die Browser-Quelle mit der richtigen Adresse an.
+
+URL-Parameter: `source=<Quelle mit dem Filter>` (ohne: erste Quelle mit aktivem Pack-Opening), `show=total,hits,count`,
+`hits=3`, `scale=1`, `align=left|right`, `bg=0|1` (halbtransparente Kästen). Die Seite fragt `/api/state?overlay=1` ab –
+`overlay=1` zählt nicht als „Dock offen“, die Kennzeichen A, B … erscheinen dadurch nicht im Video.

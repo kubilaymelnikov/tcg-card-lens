@@ -268,3 +268,21 @@ def test_build_index_writes_per_game_and_skips_unchanged(data, monkeypatch):
     mtime = os.path.getmtime(index_path(NAME, "pokemon"))
     build_index(emb, games=["pokemon"])
     assert emb.calls == 3 and os.path.getmtime(index_path(NAME, "pokemon")) == mtime
+
+
+def test_unloadable_images_do_not_loop_forever(tmp_path, monkeypatch):
+    """Scheitern Bilder dauerhaft (404), meldet images_chunk keinen Fortschritt – sonst endlose Index-Neubauten."""
+    from types import SimpleNamespace
+
+    from cardengine import maintenance
+
+    recs = [SimpleNamespace(id=f"x{i}", image_path=str(tmp_path / f"x{i}.jpg")) for i in range(3)]
+    calls = []
+    m = maintenance.Maintenance(games=["pokemon"])
+    monkeypatch.setattr(m, "images_pending", lambda game: list(recs))
+    monkeypatch.setattr(maintenance, "download_images", lambda chunk, workers, progress=None: calls.append(len(chunk)))
+    assert m.images_chunk() == 0  # nichts geladen → kein Fortschritt
+    assert m.images_chunk() == 0 and calls == [3]  # zweiter Aufruf versucht es gar nicht erst erneut
+    (tmp_path / "x9.jpg").write_bytes(b"x")  # neues, ladbares Bild taucht auf
+    recs.append(SimpleNamespace(id="x9", image_path=str(tmp_path / "x9.jpg")))
+    assert m.images_chunk() == 1
