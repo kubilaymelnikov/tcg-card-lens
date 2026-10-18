@@ -28,8 +28,8 @@ status messages, the card dock and the session display. Prices and numbers use t
 
 ## Installation (Windows)
 
-Requirements: Windows 10/11, OBS Studio 32 or newer (tested with 32.2), NVIDIA graphics card RTX 20xx (Turing) or
-newer with a current driver – AMD and Intel graphics cards run via DirectML (not yet tested), without a graphics card
+Requirements: Windows 10/11, OBS Studio 32 or newer (tested with 32.2), a DirectX 12 graphics card with a current
+driver (tested: NVIDIA RTX 2080 SUPER; AMD and Intel also run via DirectML, not yet tested), without a graphics card
 it runs more slowly on the CPU –, about 3 GB of free disk space.
 
 1. Download `TCGCardLens-Setup-<version>.exe` from the
@@ -38,7 +38,7 @@ it runs more slowly on the CPU –, about 3 GB of free disk space.
    The installer itself is in German.
 2. On the **games and languages** page (*Spiele und Sprachen*), choose which games to recognize and in which
    languages card names should be available.
-3. The installer sets up Python, the AI models and the card data (a few minutes, downloads about 1 GB with NVIDIA, otherwise about 0.2 GB).
+3. The installer sets up Python, the AI models and the card data (a few minutes, downloads about 0.2 GB; about 1 GB with `-Runtime cuda` for NVIDIA).
    Recognition data comes as ready-made packs from the release; card images are not distributed.
 4. In OBS: right-click your camera source → **Filters** → **+** → **TCG Card Lens**.
    The engine starts automatically in the background.

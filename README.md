@@ -18,8 +18,8 @@
 
 ## Installation (Windows)
 
-Voraussetzungen: Windows 10/11, OBS Studio 32 oder neuer (getestet mit 32.2), NVIDIA-Grafikkarte ab RTX 20xx (Turing) mit aktuellem
-Treiber – AMD- und Intel-Grafikkarten laufen über DirectML (noch ungetestet), ohne Grafikkarte geht es langsamer auf
+Voraussetzungen: Windows 10/11, OBS Studio 32 oder neuer (getestet mit 32.2), eine DirectX-12-Grafikkarte mit aktuellem
+Treiber (getestet: NVIDIA RTX 2080 SUPER; AMD und Intel laufen ebenfalls über DirectML, noch ungetestet), ohne Grafikkarte geht es langsamer auf
 der CPU –, etwa 3 GB freier Speicher.
 
 1. Aus dem [neuesten Release](https://github.com/kubilaymelnikov/tcg-card-lens/releases/latest)
@@ -27,7 +27,7 @@ der CPU –, etwa 3 GB freier Speicher.
    Windows SmartScreen warnt bei unsignierten Programmen: „Weitere Informationen → Trotzdem ausführen“.
 2. Auf der Seite **Spiele und Sprachen** auswählen, was erkannt werden soll und in welchen Sprachen Kartennamen
    angezeigt werden.
-3. Das Setup richtet Python, die KI-Modelle und die Kartendaten ein (einige Minuten, lädt ca. 1 GB mit NVIDIA, sonst ca. 0,2 GB).
+3. Das Setup richtet Python, die KI-Modelle und die Kartendaten ein (einige Minuten, lädt ca. 0,2 GB; mit `-Runtime cuda` für NVIDIA ca. 1 GB).
    Die Erkennungsdaten kommen als fertige Pakete aus dem Release; Kartenbilder werden nicht verteilt.
 4. In OBS: Rechtsklick auf deine Kamera-Quelle → **Filter** → **+** → **TCG Card Lens**.
    Die Engine startet automatisch im Hintergrund.
@@ -109,13 +109,13 @@ oder MTGJSON.
 ## English
 
 OBS Studio filter that detects Pokémon, Magic: The Gathering and Yu-Gi-Oh! cards in a camera feed, identifies the
-exact print locally on an NVIDIA GPU and overlays the Cardmarket price and price history. Uncertain prints never
+exact print locally on your GPU (DirectML: NVIDIA, AMD, Intel) and overlays the Cardmarket price and price history. Uncertain prints never
 show a price. A browser dock lets you confirm or correct cards; confirmations are learned locally. A pack opening
 mode detects hits and keeps a session list. **The interface follows the OBS language** (German or English).
 
 **Install:** run `TCGCardLens-Setup-<version>.exe` from the
 [latest release](https://github.com/kubilaymelnikov/tcg-card-lens/releases/latest) (Windows 10/11, OBS 32+,
-NVIDIA RTX 20xx or newer, ~6 GB), then in OBS add the filter **TCG Card Lens** to your camera source and add the
+a DirectX 12 GPU, ~2 GB), then in OBS add the filter **TCG Card Lens** to your camera source and add the
 dock via **Docks → Custom Browser Docks…** with the URL `http://127.0.0.1:47830/`.
 
 Full English instructions: **[README.en.md](README.en.md)**. License: AGPL-3.0.
