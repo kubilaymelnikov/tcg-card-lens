@@ -1,9 +1,9 @@
 # Laufzeit der Engine (schlank, ohne PyTorch): Inferenz über ONNX Runtime.
 # Das onnxruntime-Paket steht hier bewusst NICHT – es hängt von der GPU ab und wird von setup-engine.ps1 gewählt.
 # Es darf immer nur eines installiert sein (alle liefern dasselbe Modul `onnxruntime`):
-#   NVIDIA:     onnxruntime-gpu[cuda,cudnn]==1.31.0   (CUDA-13- und cuDNN-9-Laufzeit als Pip-Pakete, kein CUDA-Toolkit nötig)
-#   AMD/Intel:  onnxruntime-directml==1.24.4          (DirectML: jede DirectX-12-fähige GPU)
-#   sonst:      onnxruntime==1.31.0                   (nur CPU)
+#   Standard, jede GPU (NVIDIA/AMD/Intel):  onnxruntime-directml==1.24.4  (DirectML, ~0,4 GB gesamt)
+#   NVIDIA auf Wunsch (-Runtime cuda):     onnxruntime-gpu[cuda,cudnn]==1.31.0  (CUDA/cuDNN als Pip-Pakete, ~2,1 GB)
+#   ohne GPU:                              onnxruntime==1.31.0  (nur CPU)
 # PyTorch-Backend, Training und ONNX-Export: requirements-dev.txt
 numpy==2.5.4
 opencv-python==4.14.0.94
