@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Karten</title>
+<title>Cards</title>
 <style>
 :root {
   --bg: #1e1f25;
@@ -346,26 +346,26 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
 <body>
 <header>
   <div class="hrow">
-    <div class="status"><span class="dot" id="dot"></span><span class="status-text" id="status">Verbinde …</span></div>
+    <div class="status"><span class="dot" id="dot"></span><span class="status-text" id="status" data-i18n="connecting">Verbinde …</span></div>
     <span class="learned" id="learned" hidden></span>
   </div>
   <div class="hrow ctrl">
-    <span id="src-wrap" hidden>Quelle <select id="src" aria-label="Quelle"></select></span>
+    <span id="src-wrap" hidden><span data-i18n="source">Quelle</span> <select id="src" aria-label="Quelle" data-i18n-aria="source"></select></span>
     <span class="spacer"></span>
-    <label><input type="checkbox" id="unsure"> nur unsichere</label>
+    <label><input type="checkbox" id="unsure"> <span data-i18n="only_unsure">nur unsichere</span></label>
   </div>
   <div class="hrow ctrl modes" id="modes" hidden>
-    <label class="sw" title="Aus: Der Kartenfinder sucht nicht selbst – Karten nur gezielt per Klick oder Rahmen im Kamerabild"><input type="checkbox" id="sw-auto"><span class="knob"></span>Automatisch erkennen</label>
-    <label class="sw" title="Hits erkennen, Session-Wert zählen (Pack-Opening)"><input type="checkbox" id="sw-pack"><span class="knob"></span>Pack-Opening</label>
-    <span id="thr-wrap" hidden>Hit ab <input type="number" id="pack-thr" min="0.01" step="0.05" aria-label="Hit-Schwelle in Euro"> €</span>
+    <label class="sw" title="Aus: Der Kartenfinder sucht nicht selbst – Karten nur gezielt per Klick oder Rahmen im Kamerabild" data-i18n-title="auto_title"><input type="checkbox" id="sw-auto"><span class="knob"></span><span data-i18n="auto">Automatisch erkennen</span></label>
+    <label class="sw" title="Hits erkennen, Session-Wert zählen (Pack-Opening)" data-i18n-title="pack_title"><input type="checkbox" id="sw-pack"><span class="knob"></span><span data-i18n="pack">Pack-Opening</span></label>
+    <span id="thr-wrap" hidden><span data-i18n="hit_from">Hit ab</span> <input type="number" id="pack-thr" min="0.01" step="0.05" aria-label="Hit-Schwelle in Euro" data-i18n-aria="thr_aria"> €</span>
   </div>
 </header>
-<div class="offline" id="offline" hidden>Engine nicht erreichbar – startet OBS-Filter? Neuer Versuch läuft …</div>
+<div class="offline" id="offline" hidden data-i18n="offline">Engine nicht erreichbar – startet OBS-Filter? Neuer Versuch läuft …</div>
 <main id="main">
   <section id="sec-frame">
-    <h2><button type="button" class="fv-toggle" id="fv-toggle" aria-expanded="true" aria-controls="fv-body"><span class="chev">▾</span>Kamerabild</button>
+    <h2><button type="button" class="fv-toggle" id="fv-toggle" aria-expanded="true" aria-controls="fv-body"><span class="chev">▾</span><span data-i18n="camera_image">Kamerabild</span></button>
       <span class="fv-src" id="fv-src"></span>
-      <button type="button" class="btn sm" id="fv-rect" aria-pressed="false" title="Der nächste Zieh-Vorgang zeichnet einen Rahmen um eine Karte (Esc bricht ab)">▭ Rahmen ziehen</button></h2>
+      <button type="button" class="btn sm" id="fv-rect" aria-pressed="false" title="Der nächste Zieh-Vorgang zeichnet einen Rahmen um eine Karte (Esc bricht ab)" data-i18n-title="rect_title" data-i18n="rect_btn">▭ Rahmen ziehen</button></h2>
     <div id="fv-body">
       <div class="fv-tabs" id="fv-tabs" hidden></div>
       <div class="fv-wrap" id="fv-wrap">
@@ -375,26 +375,26 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
           <g id="fv-probe" class="fv-probe" style="display:none"><circle class="ring" r="10"></circle><circle class="dot" r="3"></circle></g>
         </svg>
         <div class="fv-empty" id="fv-empty">Noch kein Kamerabild</div>
-        <div class="fv-mode" id="fv-mode" hidden>Rahmen um die Karte ziehen · Esc bricht ab</div>
+        <div class="fv-mode" id="fv-mode" hidden data-i18n="rect_mode">Rahmen um die Karte ziehen · Esc bricht ab</div>
       </div>
-      <div class="fv-hint">Klick auf eine übersehene Karte = dort genauer suchen · Ziehen = Rahmen um die Karte</div>
+      <div class="fv-hint" data-i18n="fv_hint">Klick auf eine übersehene Karte = dort genauer suchen · Ziehen = Rahmen um die Karte</div>
     </div>
   </section>
   <section id="sec-confirm" hidden>
-    <h2>Bitte bestätigen <span class="count" id="cnt-confirm">0</span></h2>
+    <h2><span data-i18n="please_confirm">Bitte bestätigen</span> <span class="count" id="cnt-confirm">0</span></h2>
     <div class="grid grid-confirm" id="grid-confirm"></div>
   </section>
   <section id="sec-seen">
-    <h2>Erkannt <span class="count" id="cnt-seen">0</span></h2>
+    <h2><span data-i18n="recognized">Erkannt</span> <span class="count" id="cnt-seen">0</span></h2>
     <div class="grid grid-seen" id="grid-seen"></div>
     <div class="empty" id="empty-seen" hidden>Keine Karten im Bild.</div>
   </section>
   <section id="sec-pack" hidden>
-    <h2>Session</h2>
+    <h2 data-i18n="session">Session</h2>
     <div id="pack-list"></div>
   </section>
 </main>
-<footer>Bestätigungen werden lokal gelernt und als Trainingsdaten gespeichert.</footer>
+<footer data-i18n="footer">Bestätigungen werden lokal gelernt und als Trainingsdaten gespeichert.</footer>
 <div id="toast" aria-live="polite"></div>
 
 <script>
@@ -426,25 +426,196 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) { /* egal */ } }
   };
 
+  // ---------- Sprache (Deutsch/Englisch) ----------
+  // Folgt der OBS-Sprache: /api/state liefert je Sitzung "ui_language" und global "ui_language" (erste Sitzung).
+  // ?lang=de|en in der URL überschreibt sie. Ohne Angabe: zuletzt benutzte Sprache, sonst Browser-Sprache.
+  var I18N = {
+    de: {
+      title: 'Karten', connecting: 'Verbinde …', source: 'Quelle', only_unsure: 'nur unsichere',
+      auto: 'Automatisch erkennen',
+      auto_title: 'Aus: Der Kartenfinder sucht nicht selbst – Karten nur gezielt per Klick oder Rahmen im Kamerabild',
+      pack: 'Pack-Opening', pack_title: 'Hits erkennen, Session-Wert zählen (Pack-Opening)',
+      hit_from: 'Hit ab', thr_aria: 'Hit-Schwelle in Euro',
+      offline: 'Engine nicht erreichbar – startet OBS-Filter? Neuer Versuch läuft …',
+      camera_image: 'Kamerabild', rect_btn: '▭ Rahmen ziehen',
+      rect_title: 'Der nächste Zieh-Vorgang zeichnet einen Rahmen um eine Karte (Esc bricht ab)',
+      rect_mode: 'Rahmen um die Karte ziehen · Esc bricht ab',
+      fv_hint: 'Klick auf eine übersehene Karte = dort genauer suchen · Ziehen = Rahmen um die Karte',
+      please_confirm: 'Bitte bestätigen', recognized: 'Erkannt', session: 'Session',
+      footer: 'Bestätigungen werden lokal gelernt und als Trainingsdaten gespeichert.',
+      no: 'Nr. {n}', card_one: '{n} Karte', card_many: '{n} Karten', hit_one: '{n} Hit', hit_many: '{n} Hits',
+      since: 'seit {t}', new_session: 'Neue Session', really_new: 'Wirklich neu?',
+      new_session_title: 'Liste leeren und neu zählen (eine nicht leere Session wird vorher als CSV gesichert)',
+      new_session_saved: 'Neue Session – alte gesichert: {path}', new_session_started: 'Neue Session gestartet.',
+      csv_export: 'CSV exportieren',
+      csv_export_title: 'Speichert die Liste unter engine/data/sessions/ (Excel-tauglich: Semikolon, Dezimalkomma)',
+      csv_saved: 'CSV gespeichert: {path}', csv_download: 'CSV herunterladen (im Browser)',
+      pack_off: 'Pack-Opening ist im OBS-Filter aus – es wird nicht weiter gezählt.',
+      pack_empty: 'Noch keine sicher erkannte Karte in dieser Session.',
+      pack_remove: 'Aus der Session entfernen (falsch gezählt)', pack_remove_aria: 'Eintrag {name} entfernen',
+      engine_offline: 'Engine nicht erreichbar', conn_flaky: 'Verbindung hakt', as_of: 'Stand {t}',
+      error: 'Fehler: {msg}', request_failed: 'Anfrage fehlgeschlagen',
+      confirmed_toast: 'Bestätigt – wird gelernt.', rejected_toast: 'Als „Keine Karte“ gemerkt.',
+      current: 'aktuell', choose: '(wählen)', alternatives: 'Alternativen', no_alternatives: 'Keine Alternativen vorhanden.',
+      search_ph: 'Karte suchen …', search_aria: 'Karte suchen', game: 'Spiel', all: 'Alle', no_card: 'Keine Karte',
+      preview: 'Vorschau: {what}', reference: 'Referenz', camera: 'Kamera', min_chars: 'Mindestens 2 Zeichen eingeben.',
+      searching: 'Suche …', no_results: 'Keine Treffer.', search_failed: 'Suche fehlgeschlagen.',
+      remove: 'Entfernen', remove_title: 'Entfernen (ohne Angabe von Gründen)', is_this: 'Ist das die Karte?',
+      similarity: 'Ähnlichkeit', rotate: 'Drehen', rotate_btn: '↻ Drehen',
+      rotate_title: 'Karte liegt falsch herum? Um 90° drehen und neu erkennen',
+      rotate_title2: 'Lage falsch? Um 90° drehen und neu erkennen',
+      newsug_title: 'Die Engine schlägt inzwischen etwas anderes vor',
+      newsug: 'Neuer Vorschlag verfügbar – aktualisieren',
+      newsug_title2: 'Die Engine meldet inzwischen etwas anderes', newsug2: 'Neuer Vorschlag – aktualisieren',
+      yes: 'Ja', choose_print: 'Druck wählen', other: 'Andere …', wrong: 'Falsch?', change_30d: 'Änderung 30 Tage',
+      refresh: 'Aktualisieren', refresh_title: 'Aktualisieren (neu erkennen, Preis neu laden)',
+      not_recognized: 'Nicht erkannt', recognizing: 'Wird erkannt …', unknown_card: 'Unbekannte Karte',
+      reason: 'Grund: {r}', no_price: 'kein Preis',
+      tag_confirmed: 'bestätigt', tag_learned: 'gelernt', tag_unsure: 'unsicher', tag_failed: 'fehlgeschlagen',
+      rechecking_gone: 'Karte wird gerade neu geprüft …', rechecking: 'wird neu geprüft …',
+      waiting: 'wartet auf deine Antwort',
+      setting_failed: 'Einstellung nicht übernommen: {msg}', auto_on: 'Automatische Erkennung an',
+      auto_off: 'Automatische Erkennung aus – Karten per Klick/Rahmen im Kamerabild',
+      pack_on: 'Pack-Opening an', pack_off_toast: 'Pack-Opening aus', thr_min: 'Schwelle mindestens {v}',
+      hit_from_toast: 'Hit ab {v}', connected: 'verbunden', learned_one: ' Referenz gelernt',
+      learned_many: ' Referenzen gelernt', learned_title: 'Gelernte Referenzen: {n}',
+      negatives: ' · Negativbeispiele: {n}', dataset: ' · Trainingsbeispiele: {n}', all_sources: 'Alle Quellen',
+      no_unsure: 'Keine unsicheren Karten.',
+      no_source: 'Keine Quelle aktiv – Filter „TCG Card Lens“ in OBS hinzufügen.', no_cards: 'Keine Karten im Bild.',
+      fv_tab_title: 'Kamerabild von „{src}“ zeigen', fv_none: 'Noch kein Kamerabild',
+      fv_loading: 'Kamerabild wird geladen …', tile_hidden: 'Karte {lab} ist ausgeblendet („nur unsichere“).',
+      tile_missing: 'Karte {lab} steht noch nicht im Dock.', probe_busy: 'Suche läuft noch …',
+      rect_hold: 'Maustaste gedrückt halten und einen Rahmen um die Karte ziehen.',
+      rect_small: 'Rahmen zu klein – bitte größer um die Karte ziehen.',
+      probe_exists: 'Karte {lab} liegt dort schon – wird neu erkannt.', probe_found: 'Karte gefunden: {lab}',
+      probe_none: 'Keine Karte gefunden – Rahmen um die Karte ziehen', probe_failed: 'Suche fehlgeschlagen'
+    },
+    en: {
+      title: 'Cards', connecting: 'Connecting …', source: 'Source', only_unsure: 'uncertain only',
+      auto: 'Auto-detect',
+      auto_title: 'Off: the card finder does not search by itself – cards only on demand via click or box in the camera image',
+      pack: 'Pack opening', pack_title: 'Detect hits, count session value (pack opening)',
+      hit_from: 'Hit from', thr_aria: 'Hit threshold in euros',
+      offline: 'Engine not reachable – is the OBS filter running? Retrying …',
+      camera_image: 'Camera image', rect_btn: '▭ Draw box',
+      rect_title: 'The next drag draws a box around a card (Esc cancels)',
+      rect_mode: 'Drag a box around the card · Esc cancels',
+      fv_hint: 'Click a missed card = search there more closely · Drag = box around the card',
+      please_confirm: 'Please confirm', recognized: 'Recognized', session: 'Session',
+      footer: 'Confirmations are learned locally and saved as training data.',
+      no: 'No. {n}', card_one: '{n} card', card_many: '{n} cards', hit_one: '{n} hit', hit_many: '{n} hits',
+      since: 'since {t}', new_session: 'New session', really_new: 'Really start over?',
+      new_session_title: 'Clear the list and start counting again (a non-empty session is saved as CSV first)',
+      new_session_saved: 'New session – previous one saved: {path}', new_session_started: 'New session started.',
+      csv_export: 'Export CSV',
+      csv_export_title: 'Saves the list to engine/data/sessions/ (Excel-ready: comma-separated, decimal point)',
+      csv_saved: 'CSV saved: {path}', csv_download: 'Download CSV (in the browser)',
+      pack_off: 'Pack opening is off in the OBS filter – counting has stopped.',
+      pack_empty: 'No reliably recognized card in this session yet.',
+      pack_remove: 'Remove from session (counted by mistake)', pack_remove_aria: 'Remove entry {name}',
+      engine_offline: 'Engine not reachable', conn_flaky: 'Connection unstable', as_of: 'as of {t}',
+      error: 'Error: {msg}', request_failed: 'Request failed',
+      confirmed_toast: 'Confirmed – will be learned.', rejected_toast: 'Remembered as “No card”.',
+      current: 'current', choose: '(select)', alternatives: 'Alternatives', no_alternatives: 'No alternatives available.',
+      search_ph: 'Search card …', search_aria: 'Search card', game: 'Game', all: 'All', no_card: 'No card',
+      preview: 'Preview: {what}', reference: 'Reference', camera: 'Camera', min_chars: 'Enter at least 2 characters.',
+      searching: 'Searching …', no_results: 'No results.', search_failed: 'Search failed.',
+      remove: 'Remove', remove_title: 'Remove (no reason given)', is_this: 'Is this the card?',
+      similarity: 'Similarity', rotate: 'Rotate', rotate_btn: '↻ Rotate',
+      rotate_title: 'Card upside down? Rotate by 90° and recognize again',
+      rotate_title2: 'Wrong orientation? Rotate by 90° and recognize again',
+      newsug_title: 'The engine now suggests something else',
+      newsug: 'New suggestion available – update',
+      newsug_title2: 'The engine now reports something else', newsug2: 'New suggestion – update',
+      yes: 'Yes', choose_print: 'Choose print', other: 'Other …', wrong: 'Wrong?', change_30d: 'Change 30 days',
+      refresh: 'Refresh', refresh_title: 'Refresh (recognize again, reload price)',
+      not_recognized: 'Not recognized', recognizing: 'Recognizing …', unknown_card: 'Unknown card',
+      reason: 'Reason: {r}', no_price: 'no price',
+      tag_confirmed: 'confirmed', tag_learned: 'learned', tag_unsure: 'uncertain', tag_failed: 'failed',
+      rechecking_gone: 'Card is being re-checked …', rechecking: 'being re-checked …',
+      waiting: 'waiting for your answer',
+      setting_failed: 'Setting not applied: {msg}', auto_on: 'Auto-detect on',
+      auto_off: 'Auto-detect off – pick cards via click/box in the camera image',
+      pack_on: 'Pack opening on', pack_off_toast: 'Pack opening off', thr_min: 'Threshold at least {v}',
+      hit_from_toast: 'Hit from {v}', connected: 'connected', learned_one: ' reference learned',
+      learned_many: ' references learned', learned_title: 'Learned references: {n}',
+      negatives: ' · negative examples: {n}', dataset: ' · training examples: {n}', all_sources: 'All sources',
+      no_unsure: 'No uncertain cards.',
+      no_source: 'No active source – add the “TCG Card Lens” filter in OBS.', no_cards: 'No cards in view.',
+      fv_tab_title: 'Show camera image of “{src}”', fv_none: 'No camera image yet',
+      fv_loading: 'Loading camera image …', tile_hidden: 'Card {lab} is hidden (“uncertain only”).',
+      tile_missing: 'Card {lab} is not in the dock yet.', probe_busy: 'Search still running …',
+      rect_hold: 'Hold the mouse button and drag a box around the card.',
+      rect_small: 'Box too small – please drag a larger box around the card.',
+      probe_exists: 'Card {lab} is already there – recognizing again.', probe_found: 'Card found: {lab}',
+      probe_none: 'No card found – drag a box around the card', probe_failed: 'Search failed'
+    }
+  };
+  function normLang(v) {
+    if (typeof v !== 'string' || !v) return null;
+    return v.trim().toLowerCase().indexOf('de') === 0 ? 'de' : 'en';
+  }
+  var urlLang = (function () {
+    var m = /[?&]lang=(de|en)(?:&|$)/i.exec(location.search);
+    return m ? m[1].toLowerCase() : null;
+  })();
+  var LANG = urlLang || normLang(store.get('tcl.dock.lang', '')) || normLang(navigator.language) || 'de';
+  var LOCALE = 'de-DE';
+  function T(key, p) {
+    var s = I18N[LANG] && I18N[LANG][key];
+    if (s == null) s = I18N.de[key];
+    if (s == null) return key;
+    if (p) s = s.replace(/\{(\w+)\}/g, function (m, k) { return p[k] != null ? String(p[k]) : m; });
+    return s;
+  }
+  // Statische Texte: data-i18n (Text), data-i18n-title, data-i18n-aria (aria-label), data-i18n-ph (placeholder)
+  function applyStatic(root) {
+    root.querySelectorAll('[data-i18n]').forEach(function (n) { setText(n, T(n.getAttribute('data-i18n'))); });
+    [['data-i18n-title', 'title'], ['data-i18n-aria', 'aria-label'], ['data-i18n-ph', 'placeholder']].forEach(function (a) {
+      root.querySelectorAll('[' + a[0] + ']').forEach(function (n) {
+        var v = T(n.getAttribute(a[0]));
+        if (n.getAttribute(a[1]) !== v) n.setAttribute(a[1], v);
+      });
+    });
+  }
+  // Mit der Sprache wechselnde Formate (Preise, Prozent, Uhrzeit) und statische Texte setzen
+  function applyLang() {
+    LOCALE = LANG === 'de' ? 'de-DE' : 'en-US';
+    document.documentElement.lang = LANG;
+    document.title = T('title');
+    moneyFmt = {};
+    try { pctFmt = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 1, minimumFractionDigits: 1 }); }
+    catch (e) { pctFmt = { format: function (v) { return Number(v).toFixed(1); } }; }
+    applyStatic(document);
+  }
+  // URL mit Sprachangabe für Anfragen an die Engine (Texte wie Gründe/Fehler kommen dann in derselben Sprache)
+  function withLang(url) { return url + (url.indexOf('?') < 0 ? '?' : '&') + 'lang=' + LANG; }
+
   var moneyFmt = {};
   function money(v, cur) {
     cur = cur || 'EUR';
     try {
-      if (!moneyFmt[cur]) moneyFmt[cur] = new Intl.NumberFormat('de-DE', { style: 'currency', currency: cur });
+      if (!moneyFmt[cur]) moneyFmt[cur] = new Intl.NumberFormat(LOCALE, { style: 'currency', currency: cur });
       return moneyFmt[cur].format(v);
-    } catch (e) { return Number(v).toFixed(2).replace('.', ',') + ' ' + cur; }
+    } catch (e) {
+      var n = Number(v).toFixed(2);
+      return LANG === 'de' ? n.replace('.', ',') + ' ' + cur : cur + ' ' + n;
+    }
   }
-  var pctFmt = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 1, minimumFractionDigits: 1 });
+  var pctFmt = null;
+  // Prozent: „81 %“ (de) bzw. „81%“ (en)
+  function pctSuffix() { return LANG === 'de' ? ' %' : '%'; }
   function pct(sim) {
     if (typeof sim !== 'number' || !isFinite(sim)) return '';
-    return Math.round(sim * 100) + ' %';
+    return Math.round(sim * 100) + pctSuffix();
   }
+  applyLang();
   function metaLine(c) {
     var parts = [];
     var set = c.set_name || '';
     if (c.set_code) set = set ? set + ' (' + c.set_code + ')' : c.set_code;
     if (set) parts.push(set);
-    if (c.number) parts.push('Nr. ' + c.number);
+    if (c.number) parts.push(T('no', { n: c.number }));
     return parts.join(' · ');
   }
   function labelCmp(a, b) {
@@ -506,7 +677,7 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     }, function (e) { if (to) clearTimeout(to); throw e; });
   }
   function post(path, body) {
-    return fetchJson(path, {
+    return fetchJson(withLang(path), {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
     }, 6000).then(function (r) {
       if (!r.ok || !r.json || r.json.ok === false) {
@@ -565,9 +736,10 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     clearTimeout(pollTimer);
     if (inflight) { again = true; return; }
     inflight = true;
-    fetchJson('/api/state', {}, POLL_TIMEOUT_MS).then(function (r) {
+    fetchJson(withLang('/api/state'), {}, POLL_TIMEOUT_MS).then(function (r) {
       if (!r.ok || !r.json || typeof r.json !== 'object') throw new Error('HTTP ' + r.status);
       state = r.json; failCount = 0; everOk = true; lastOkAt = Date.now();
+      syncLang(state);
       // Neue Dock-Version in der Engine → Seite neu laden (nicht während einer Eingabe)
       if (state.dock_rev) {
         if (dockRev === null) dockRev = state.dock_rev;
@@ -601,7 +773,7 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     });
     var sig = JSON.stringify(sessions.map(function (x) {
       var p = x.pack;
-      return [x.id, x.source, p.enabled, p.started, p.total, p.cards.map(function (c) { return [c.id, c.price, c.hit, c.name]; })];
+      return [LANG, x.id, x.source, p.enabled, p.started, p.total, p.cards.map(function (c) { return [c.id, c.price, c.hit, c.name]; })];
     }));
     show($('sec-pack'), sessions.length > 0);
     if (sig === packSig) return;
@@ -614,43 +786,44 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     var p = x.pack, box = el('div', 'pk');
     var head = el('div', 'pk-head');
     head.appendChild(el('span', 'pk-total', money(p.total || 0, 'EUR')));
-    var meta = p.count + (p.count === 1 ? ' Karte' : ' Karten') + ' · ' + p.hits + (p.hits === 1 ? ' Hit' : ' Hits');
+    var meta = T(p.count === 1 ? 'card_one' : 'card_many', { n: p.count }) + ' · ' +
+      T(p.hits === 1 ? 'hit_one' : 'hit_many', { n: p.hits });
     if (multi) meta = (x.source || x.id) + ' · ' + meta;
-    if (p.started) meta += ' · seit ' + clock(p.started * 1000);
+    if (p.started) meta += ' · ' + T('since', { t: clock(p.started * 1000) });
     head.appendChild(el('span', 'pk-meta', meta));
     head.appendChild(el('span', 'spacer'));
-    var bNew = el('button', 'btn sm', 'Neue Session');
+    var bNew = el('button', 'btn sm', T('new_session'));
     bNew.type = 'button';
-    bNew.title = 'Liste leeren und neu zählen (eine nicht leere Session wird vorher als CSV gesichert)';
+    bNew.title = T('new_session_title');
     bNew.addEventListener('click', function () {
       // Zweiter Klick bestätigt (JS-Dialoge sind in OBS-Browser-Docks nicht verlässlich)
       if (p.count && !bNew._armed) {
-        bNew._armed = true; bNew.textContent = 'Wirklich neu?'; bNew.classList.add('danger');
-        setTimeout(function () { bNew._armed = false; bNew.textContent = 'Neue Session'; bNew.classList.remove('danger'); }, 3000);
+        bNew._armed = true; bNew.textContent = T('really_new'); bNew.classList.add('danger');
+        setTimeout(function () { bNew._armed = false; bNew.textContent = T('new_session'); bNew.classList.remove('danger'); }, 3000);
         return;
       }
       bNew.disabled = true;
       post('/api/pack/reset', { session: x.id }).then(function (r) {
-        toast(r && r.saved ? 'Neue Session – alte gesichert: ' + r.saved : 'Neue Session gestartet.', 'ok');
+        toast(r && r.saved ? T('new_session_saved', { path: r.saved }) : T('new_session_started'), 'ok');
         pollNow();
       }, function (err) { toast(String(err && err.message || err), 'err'); bNew.disabled = false; });
     });
-    var bCsv = el('button', 'btn sm', 'CSV exportieren');
+    var bCsv = el('button', 'btn sm', T('csv_export'));
     bCsv.type = 'button';
     bCsv.disabled = !p.count;
-    bCsv.title = 'Speichert die Liste unter engine/data/sessions/ (Excel-tauglich: Semikolon, Dezimalkomma)';
+    bCsv.title = T('csv_export_title');
     bCsv.addEventListener('click', function () {
       post('/api/pack/export', { session: x.id }).then(function (r) {
-        toast('CSV gespeichert: ' + (r && r.path || ''), 'ok');
+        toast(T('csv_saved', { path: r && r.path || '' }), 'ok');
       }, function (err) { toast(String(err && err.message || err), 'err'); });
     });
     var aDl = el('a', 'btn sm', '⤓');
-    aDl.href = p.csv; aDl.setAttribute('download', ''); aDl.title = 'CSV herunterladen (im Browser)';
+    aDl.href = withLang(p.csv); aDl.setAttribute('download', ''); aDl.title = T('csv_download');
     head.appendChild(bNew); head.appendChild(bCsv); head.appendChild(aDl);
     box.appendChild(head);
-    if (!p.enabled) box.appendChild(el('div', 'pk-off', 'Pack-Opening ist im OBS-Filter aus – es wird nicht weiter gezählt.'));
+    if (!p.enabled) box.appendChild(el('div', 'pk-off', T('pack_off')));
     if (!p.cards.length) {
-      box.appendChild(el('div', 'empty', 'Noch keine sicher erkannte Karte in dieser Session.'));
+      box.appendChild(el('div', 'empty', T('pack_empty')));
       return box;
     }
     var ul = el('ul', 'pk-list');
@@ -661,13 +834,13 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
       nm.style.minWidth = '0';
       var n1 = el('div', 'pk-name', c.name); n1.title = c.name;
       nm.appendChild(n1);
-      var set = [c.set_name, c.number ? 'Nr. ' + c.number : null].filter(Boolean).join(' · ');
+      var set = [c.set_name, c.number ? T('no', { n: c.number }) : null].filter(Boolean).join(' · ');
       if (set) nm.appendChild(el('div', 'pk-set', set));
       li.appendChild(nm);
       li.appendChild(el('span', 'pk-price', typeof c.price === 'number' ? money(c.price, c.currency) : '–'));
       var del = el('button', 'pk-del', '✕');
-      del.type = 'button'; del.title = 'Aus der Session entfernen (falsch gezählt)';
-      del.setAttribute('aria-label', 'Eintrag ' + c.name + ' entfernen');
+      del.type = 'button'; del.title = T('pack_remove');
+      del.setAttribute('aria-label', T('pack_remove_aria', { name: c.name }));
       del.addEventListener('click', function () {
         del.disabled = true;
         post('/api/pack/remove', { session: x.id, entry: c.id }).then(function () { pollNow(); },
@@ -681,19 +854,19 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
   }
 
   function clock(ms) {
-    try { return new Date(ms).toLocaleTimeString('de-DE'); } catch (e) { return ''; }
+    try { return new Date(ms).toLocaleTimeString(LOCALE); } catch (e) { return ''; }
   }
   // Fehler beim Abfragen: alles stehen lassen, nur den Kopf ändern (keine Layout-Verschiebung).
   function renderOffline() {
     if (!everOk) {
       show(ui.offline, true);
       ui.dot.className = 'dot err';
-      setText(ui.status, 'Engine nicht erreichbar');
+      setText(ui.status, T('engine_offline'));
       return;
     }
     var bad = failCount >= 4;
     ui.dot.className = 'dot ' + (bad ? 'err' : 'warn');
-    setText(ui.status, (bad ? 'Engine nicht erreichbar' : 'Verbindung hakt') + ' – Stand ' + clock(lastOkAt));
+    setText(ui.status, T(bad ? 'engine_offline' : 'conn_flaky') + ' – ' + T('as_of', { t: clock(lastOkAt) }));
   }
 
   // ---------- Hervorheben ----------
@@ -762,7 +935,7 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
       if (okMsg) toast(okMsg, 'ok');
       return true;
     }, function (err) {
-      toast('Fehler: ' + (err && err.message ? err.message : 'Anfrage fehlgeschlagen'));
+      toast(T('error', { msg: err && err.message ? err.message : T('request_failed') }));
       return false;
     }).then(function (ok) {
       t.busy = false;
@@ -775,7 +948,7 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
   }
   function confirmKey(t, key, opt) {
     if (!key) return;
-    act(t, '/api/confirm', { session: t.sid, track: t.track, key: key }, 'Bestätigt – wird gelernt.').then(function (ok) {
+    act(t, '/api/confirm', { session: t.sid, track: t.track, key: key }, T('confirmed_toast')).then(function (ok) {
       if (!ok) return;
       var p = t.picker;
       p.clear();
@@ -804,7 +977,7 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     });
   }
   function rejectCard(t) {
-    act(t, '/api/reject', { session: t.sid, track: t.track }, 'Als „Keine Karte“ gemerkt.').then(function (ok) {
+    act(t, '/api/reject', { session: t.sid, track: t.track }, T('rejected_toast')).then(function (ok) {
       if (!ok) return;
       dismissed.set(t.key, Date.now());
       t.dismissed = true;
@@ -843,13 +1016,13 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     var sub = [];
     var set = o.set_name || o.set_code || '';
     if (set) sub.push(set);
-    if (o.number) sub.push('Nr. ' + o.number);
+    if (o.number) sub.push(T('no', { n: o.number }));
     tx.appendChild(el('div', 'opt-s', sub.join(' · ') || ' '));
     if (typeof o.similarity === 'number' || current) {
-      tx.appendChild(el('div', 'opt-p', (current ? 'aktuell' : '') +
+      tx.appendChild(el('div', 'opt-p', (current ? T('current') : '') +
         (current && typeof o.similarity === 'number' ? ' · ' : '') + pct(o.similarity)));
     }
-    b.title = [o.name, o.set_name, o.number].filter(Boolean).join(' – ') + ' (wählen)';
+    b.title = [o.name, o.set_name, o.number].filter(Boolean).join(' – ') + ' ' + T('choose');
     b.appendChild(box);
     b.appendChild(tx);
     b.addEventListener('click', function () { onPick(o); });
@@ -866,16 +1039,17 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     var root = el('div', 'picker');
     root.hidden = true;
     root.innerHTML =
-      '<div class="pk-title" data-r="ctitle">Alternativen</div>' +
+      '<div class="pk-title" data-r="ctitle" data-i18n="alternatives"></div>' +
       '<div class="pk-list" data-r="cands"></div>' +
-      '<div class="pk-msg" data-r="cmsg" hidden>Keine Alternativen vorhanden.</div>' +
+      '<div class="pk-msg" data-r="cmsg" hidden data-i18n="no_alternatives"></div>' +
       '<div class="search">' +
-      '  <input type="search" data-r="q" placeholder="Karte suchen …" autocomplete="off" spellcheck="false" aria-label="Karte suchen">' +
-      '  <select data-r="game" aria-label="Spiel"><option value="">Alle</option><option value="pokemon">Pokémon</option><option value="mtg">Magic</option><option value="ygo">Yu-Gi-Oh!</option></select>' +
+      '  <input type="search" data-r="q" data-i18n-ph="search_ph" autocomplete="off" spellcheck="false" data-i18n-aria="search_aria">' +
+      '  <select data-r="game" data-i18n-aria="game"><option value="" data-i18n="all"></option><option value="pokemon">Pokémon</option><option value="mtg">Magic</option><option value="ygo">Yu-Gi-Oh!</option></select>' +
       '</div>' +
       '<div class="pk-msg" data-r="smsg" hidden></div>' +
       '<div class="pk-list" data-r="results"></div>' +
-      '<div class="pk-foot" data-r="foot" hidden><button type="button" class="btn sm danger" data-r="reject">Keine Karte</button></div>';
+      '<div class="pk-foot" data-r="foot" hidden><button type="button" class="btn sm danger" data-r="reject" data-i18n="no_card"></button></div>';
+    applyStatic(root);
     var r = refs(root);
     function pick(o) { preview(null); confirmKey(t, o.key, o); }
     // Alternative überfahren → in der Referenz-Vorschau neben dem Kamerabild zeigen
@@ -886,11 +1060,11 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
       if (o) {
         setImg(tr.image, o.image);
         tr.image.classList.add('previewing');
-        if (cap) cap.textContent = 'Vorschau: ' + [o.set_name || o.set_code, o.number ? 'Nr. ' + o.number : ''].filter(Boolean).join(' · ');
+        if (cap) cap.textContent = T('preview', { what: [o.set_name || o.set_code, o.number ? T('no', { n: o.number }) : ''].filter(Boolean).join(' · ') });
       } else {
         setImg(tr.image, t.shown ? t.shown.image : null);
         tr.image.classList.remove('previewing');
-        if (cap) cap.textContent = 'Referenz';
+        if (cap) cap.textContent = T('reference');
       }
     }
     var p = {
@@ -928,13 +1102,13 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
       if (q.length < 2) {
         r.results.textContent = '';
         show(r.smsg, q.length === 1);
-        setText(r.smsg, 'Mindestens 2 Zeichen eingeben.');
+        setText(r.smsg, T('min_chars'));
         return;
       }
       p.timer = setTimeout(function () {
         show(r.smsg, true);
-        setText(r.smsg, 'Suche …');
-        var url = '/api/search?q=' + encodeURIComponent(q) + '&limit=20' +
+        setText(r.smsg, T('searching'));
+        var url = '/api/search?lang=' + LANG + '&q=' + encodeURIComponent(q) + '&limit=20' +
           (r.game.value ? '&game=' + encodeURIComponent(r.game.value) : '');
         fetchJson(url, {}, 5000).then(function (res) {
           if (id !== p.req) return;
@@ -944,11 +1118,11 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
           var cur = t.shown ? t.shown.key : null;
           list.forEach(function (o) { r.results.appendChild(optButton(o, o.key === cur, pick, preview)); });
           show(r.smsg, list.length === 0);
-          setText(r.smsg, 'Keine Treffer.');
+          setText(r.smsg, T('no_results'));
         }).catch(function () {
           if (id !== p.req) return;
           show(r.smsg, true);
-          setText(r.smsg, 'Suche fehlgeschlagen.');
+          setText(r.smsg, T('search_failed'));
         });
       }, SEARCH_MS);
     }
@@ -966,18 +1140,18 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
 
   // ---------- Kacheln ----------
   var CONFIRM_HTML =
-    '<button type="button" class="close" data-r="close" title="Entfernen (ohne Angabe von Gründen)" aria-label="Entfernen">✕</button>' +
+    '<button type="button" class="close" data-r="close" data-i18n-title="remove_title" data-i18n-aria="remove">✕</button>' +
     '<div class="ct-head">' +
     '  <span class="badge badge-lg" data-r="badge"></span>' +
-    '  <div class="ct-q"><div class="q">Ist das die Karte?</div>' +
+    '  <div class="ct-q"><div class="q" data-i18n="is_this"></div>' +
     '    <div class="sub"><span class="note" data-r="note" hidden></span><span class="src" data-r="src"></span></div></div>' +
-    '  <span class="sim" data-r="sim" title="Ähnlichkeit"></span>' +
+    '  <span class="sim" data-r="sim" data-i18n-title="similarity"></span>' +
     '</div>' +
     '<div class="compare">' +
-    '  <figure data-r="fcrop"><figcaption>Kamera</figcaption>' +
-    '    <button type="button" class="rot" data-r="rotate" title="Karte liegt falsch herum? Um 90° drehen und neu erkennen" aria-label="Drehen">↻ Drehen</button></figure>' +
-    '  <figure data-r="fimage"><figcaption>Referenz</figcaption></figure>' +
-    '  <button type="button" class="newsug" data-r="newsug" hidden title="Die Engine schlägt inzwischen etwas anderes vor">Neuer Vorschlag verfügbar – aktualisieren</button>' +
+    '  <figure data-r="fcrop"><figcaption data-i18n="camera"></figcaption>' +
+    '    <button type="button" class="rot" data-r="rotate" data-i18n-title="rotate_title" data-i18n-aria="rotate" data-i18n="rotate_btn"></button></figure>' +
+    '  <figure data-r="fimage"><figcaption data-i18n="reference"></figcaption></figure>' +
+    '  <button type="button" class="newsug" data-r="newsug" hidden data-i18n-title="newsug_title" data-i18n="newsug"></button>' +
     '</div>' +
     '<div class="info">' +
     '  <div class="name" data-r="name"></div>' +
@@ -985,14 +1159,14 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     '  <div class="reason" data-r="reason"></div>' +
     '</div>' +
     '<div class="actions">' +
-    '  <button type="button" class="btn primary" data-r="yes">Ja</button>' +
-    '  <span class="hint" data-r="hint" hidden>Druck wählen</span>' +
-    '  <button type="button" class="btn danger" data-r="reject">Keine Karte</button>' +
-    '  <button type="button" class="btn" data-r="other" aria-expanded="false">Andere …</button>' +
+    '  <button type="button" class="btn primary" data-r="yes" data-i18n="yes"></button>' +
+    '  <span class="hint" data-r="hint" hidden data-i18n="choose_print"></span>' +
+    '  <button type="button" class="btn danger" data-r="reject" data-i18n="no_card"></button>' +
+    '  <button type="button" class="btn" data-r="other" aria-expanded="false" data-i18n="other"></button>' +
     '</div>';
 
   var COMPACT_HTML =
-    '<button type="button" class="close" data-r="close" title="Entfernen (ohne Angabe von Gründen)" aria-label="Entfernen">✕</button>' +
+    '<button type="button" class="close" data-r="close" data-i18n-title="remove_title" data-i18n-aria="remove">✕</button>' +
     '<div class="cm">' +
     '  <span class="badge" data-r="badge"></span>' +
     '  <div data-r="imgslot"></div>' +
@@ -1000,19 +1174,19 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     '    <div class="name" data-r="name"></div>' +
     '    <div class="meta" data-r="meta"></div>' +
     '    <div class="cm-line">' +
-    '      <span class="price" data-r="price"></span><span class="chg" data-r="chg" title="Änderung 30 Tage"></span>' +
+    '      <span class="price" data-r="price"></span><span class="chg" data-r="chg" data-i18n-title="change_30d"></span>' +
     '      <span class="tag" data-r="tag" hidden></span><span class="note" data-r="note" hidden></span>' +
     '      <span class="src-sm" data-r="src"></span>' +
     '    </div>' +
     '    <div class="cm-act">' +
     '      <a data-r="cm" target="_blank" rel="noopener" hidden>Cardmarket ↗</a>' +
-    '      <button type="button" class="btn icon" data-r="refresh" title="Aktualisieren" aria-label="Aktualisieren">⟳</button>' +
-    '      <button type="button" class="btn icon" data-r="rotate" title="Lage falsch? Um 90° drehen und neu erkennen" aria-label="Drehen">↻</button>' +
-    '      <button type="button" class="btn sm" data-r="other" aria-expanded="false">Falsch?</button>' +
+    '      <button type="button" class="btn icon" data-r="refresh" data-i18n-title="refresh_title" data-i18n-aria="refresh">⟳</button>' +
+    '      <button type="button" class="btn icon" data-r="rotate" data-i18n-title="rotate_title2" data-i18n-aria="rotate">↻</button>' +
+    '      <button type="button" class="btn sm" data-r="other" aria-expanded="false" data-i18n="wrong"></button>' +
     '    </div>' +
     '  </div>' +
     '</div>' +
-    '<button type="button" class="newsug" data-r="newsug" hidden title="Die Engine meldet inzwischen etwas anderes">Neuer Vorschlag – aktualisieren</button>';
+    '<button type="button" class="newsug" data-r="newsug" hidden data-i18n-title="newsug_title2" data-i18n="newsug2"></button>';
 
   function newTile(key, sid, track) {
     var t = {
@@ -1036,6 +1210,7 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     e.tabIndex = 0;
     e.hidden = true;
     e.innerHTML = mode === 'confirm' ? CONFIRM_HTML : COMPACT_HTML;
+    applyStatic(e);
     t.el = e; t.r = refs(e); t.mode = mode; t.visible = false; t.shown = null;
     var r = t.r, p = t.picker;
     r.close.addEventListener('click', function (ev) { ev.stopPropagation(); dismissCard(t); });
@@ -1089,15 +1264,16 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
   }
 
   // Inhalt aus t.latest übernehmen (nur wenn nicht eingefroren oder auf Wunsch des Nutzers).
-  function applyContent(t) {
-    var c = t.latest;
+  // c: anzuzeigender Stand (Standard: t.latest; beim Sprachwechsel der gezeigte Stand t.shown)
+  function applyContent(t, c) {
+    c = c || t.latest;
     if (!c) return;
     t.shown = c;
     var r = t.r, ses = t.ses || {};
     setText(r.badge, c.label || '?');
     setText(r.src, view.multi ? (ses.source || ses.id) : '');
-    var title = c.name || (c.state === 'failed' ? 'Nicht erkannt' :
-      (c.state === 'new' || c.state === 'identifying') ? 'Wird erkannt …' : 'Unbekannte Karte');
+    var title = c.name || T(c.state === 'failed' ? 'not_recognized' :
+      (c.state === 'new' || c.state === 'identifying') ? 'recognizing' : 'unknown_card');
     setText(r.name, title);
     setText(r.meta, metaLine(c));
     if (!r.image.classList.contains('previewing')) setImg(r.image, c.image); // Vorschau einer Alternative hat Vorrang
@@ -1105,7 +1281,7 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     if (t.mode === 'confirm') {
       setImg(r.crop, c.crop);
       setText(r.sim, pct(c.similarity));
-      setText(r.reason, c.reason ? 'Grund: ' + c.reason : '');
+      setText(r.reason, c.reason ? T('reason', { r: c.reason }) : '');
       var noKey = !c.key;
       show(r.yes, !noKey);
       show(r.hint, noKey);
@@ -1115,31 +1291,32 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
       if (pr && typeof pr.value === 'number') {
         setText(r.price, money(pr.value, pr.currency));
         cls(r.price, 'none', false);
-        r.price.title = [pr.variant, pr.updated ? 'Stand ' + new Date(pr.updated).toLocaleString('de-DE') : '']
+        r.price.title = [pr.variant, pr.updated ? T('as_of', { t: new Date(pr.updated).toLocaleString(LOCALE) }) : '']
           .filter(Boolean).join(' · ');
         var ch = pr.change_30d;
         if (typeof ch === 'number' && isFinite(ch)) {
           var up = ch > 0.05, down = ch < -0.05;
-          setText(r.chg, (up ? '▲ +' : down ? '▼ ' : '● ') + pctFmt.format(ch) + ' %');
+          setText(r.chg, (up ? '▲ +' : down ? '▼ ' : '● ') + pctFmt.format(ch) + pctSuffix());
           r.chg.className = 'chg ' + (up ? 'up' : down ? 'down' : 'flat');
         } else setText(r.chg, '');
       } else {
-        setText(r.price, c.key ? 'kein Preis' : '');
+        setText(r.price, c.key ? T('no_price') : '');
         cls(r.price, 'none', true);
         r.price.title = '';
         setText(r.chg, '');
       }
       var tag = null, tcls = '';
-      if (c.confirmed || c.method === 'bestätigt') { tag = 'bestätigt'; tcls = 'confirmed'; }
-      else if (c.method === 'gelernt') { tag = 'gelernt'; tcls = 'learned'; }
-      else if (c.state === 'uncertain') { tag = 'unsicher'; tcls = 'unsure'; }
-      else if (c.state === 'failed') { tag = 'fehlgeschlagen'; tcls = 'failed'; }
+      // method-Werte ("bestätigt", "gelernt") sind Protokollwerte der Engine, nur die Anzeige wird übersetzt
+      if (c.confirmed || c.method === 'bestätigt') { tag = T('tag_confirmed'); tcls = 'confirmed'; }
+      else if (c.method === 'gelernt') { tag = T('tag_learned'); tcls = 'learned'; }
+      else if (c.state === 'uncertain') { tag = T('tag_unsure'); tcls = 'unsure'; }
+      else if (c.state === 'failed') { tag = T('tag_failed'); tcls = 'failed'; }
       show(r.tag, !!tag);
       if (tag) { setText(r.tag, tag); r.tag.className = 'tag ' + tcls; }
       var url = c.cardmarket_url || '';
       show(r.cm, !!url);
       if (url && r.cm.getAttribute('href') !== url) r.cm.setAttribute('href', url);
-      r.refresh.title = 'Aktualisieren (neu erkennen, Preis neu laden)';
+      r.refresh.title = T('refresh_title');
     }
     t.picker.update();
   }
@@ -1149,8 +1326,8 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     var r = t.r, missing = t.missingSince != null;
     cls(t.el, 'gone', missing);
     cls(t.el, 'checking', !missing && t.recheck);
-    var note = missing ? 'Karte wird gerade neu geprüft …' : t.recheck ? 'wird neu geprüft …' :
-      (t.mode === 'confirm' && t.sticky ? 'wartet auf deine Antwort' : '');
+    var note = missing ? T('rechecking_gone') : t.recheck ? T('rechecking') :
+      (t.mode === 'confirm' && t.sticky ? T('waiting') : '');
     setText(r.note, note);
     show(r.note, !!note);
     var hl = t.ses && t.ses.highlight, lab = (t.shown || t.latest || {}).label;
@@ -1291,20 +1468,44 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     Promise.all(targets.map(function (x) {
       return post('/api/settings', Object.assign({ session: x.id }, changes));
     })).then(function () { if (msg) toast(msg, 'ok'); pollNow(); },
-      function (e) { modeHold = 0; toast('Einstellung nicht übernommen: ' + (e && e.message || e), 'err'); pollNow(); });
+      function (e) { modeHold = 0; toast(T('setting_failed', { msg: e && e.message || e }), 'err'); pollNow(); });
   }
   ui.swAuto.addEventListener('change', function () {
     sendModes({ auto_detect: ui.swAuto.checked },
-      ui.swAuto.checked ? 'Automatische Erkennung an' : 'Automatische Erkennung aus – Karten per Klick/Rahmen im Kamerabild');
+      T(ui.swAuto.checked ? 'auto_on' : 'auto_off'));
   });
   ui.swPack.addEventListener('change', function () {
-    sendModes({ pack_enabled: ui.swPack.checked }, ui.swPack.checked ? 'Pack-Opening an' : 'Pack-Opening aus');
+    sendModes({ pack_enabled: ui.swPack.checked }, T(ui.swPack.checked ? 'pack_on' : 'pack_off_toast'));
   });
   ui.thr.addEventListener('change', function () {
     var v = parseFloat(String(ui.thr.value).replace(',', '.'));
-    if (!(v >= 0.01)) { toast('Schwelle mindestens 0,01 €', 'err'); renderModes(); return; }
-    sendModes({ pack_threshold: Math.round(v * 100) / 100 }, 'Hit ab ' + v.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' }));
+    if (!(v >= 0.01)) { toast(T('thr_min', { v: money(0.01, 'EUR') }), 'err'); renderModes(); return; }
+    sendModes({ pack_threshold: Math.round(v * 100) / 100 }, T('hit_from_toast', { v: money(v, 'EUR') }));
   });
+
+  // Sprache aus /api/state übernehmen (URL-Vorgabe ?lang= hat Vorrang). Bei einem Wechsel alles mit Text neu setzen –
+  // eingefrorene Kacheln behalten ihren gezeigten Stand (nur die Sprache ändert sich), Positionen bleiben.
+  function syncLang(s) {
+    var want = urlLang || normLang(s && s.ui_language);
+    if (!want) {
+      var ses = (s && Array.isArray(s.sessions) ? s.sessions : []).filter(function (x) { return x && x.ui_language; })[0];
+      want = normLang(ses && ses.ui_language);
+    }
+    if (!want) return; // alte Engine oder keine Quelle: Sprache bleibt
+    if (!urlLang) store.set('tcl.dock.lang', want);
+    if (want !== LANG) setLang(want);
+  }
+  function setLang(l) {
+    LANG = l;
+    applyLang();
+    srcSig = null; packSig = ''; fvUi.tabs._sig = null;
+    tiles.forEach(function (t) {
+      if (!t.el || !t.r) return;
+      t.picker.sig = null;
+      if (t.shown) applyContent(t, t.shown);
+      status(t);
+    });
+  }
 
   function renderHead() {
     renderModes();
@@ -1312,23 +1513,23 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     var sessions = Array.isArray(s.sessions) ? s.sessions : [];
     show(ui.offline, false);
     ui.dot.className = 'dot ok';
-    setText(ui.status, (s.status || 'verbunden') + (s.engine ? ' · Engine ' + s.engine : ''));
+    setText(ui.status, (s.status || T('connected')) + (s.engine ? ' · Engine ' + s.engine : ''));
     var L = s.learned;
     if (L && typeof L.references === 'number') {
       show(ui.learned, true);
       ui.learned.innerHTML = '';
       ui.learned.appendChild(el('b', null, String(L.references)));
-      ui.learned.appendChild(document.createTextNode(L.references === 1 ? ' Referenz gelernt' : ' Referenzen gelernt'));
-      ui.learned.title = 'Gelernte Referenzen: ' + L.references +
-        (typeof L.negatives === 'number' ? ' · Negativbeispiele: ' + L.negatives : '') +
-        (typeof L.dataset === 'number' ? ' · Trainingsbeispiele: ' + L.dataset : '');
+      ui.learned.appendChild(document.createTextNode(T(L.references === 1 ? 'learned_one' : 'learned_many')));
+      ui.learned.title = T('learned_title', { n: L.references }) +
+        (typeof L.negatives === 'number' ? T('negatives', { n: L.negatives }) : '') +
+        (typeof L.dataset === 'number' ? T('dataset', { n: L.dataset }) : '');
     } else show(ui.learned, false);
 
-    var sig = sessions.map(function (x) { return x.id + '\u0001' + (x.source || ''); }).join('\u0002');
+    var sig = LANG + '|' + sessions.map(function (x) { return x.id + '\u0001' + (x.source || ''); }).join('\u0002');
     if (sig !== srcSig && document.activeElement !== ui.src) {
       srcSig = sig;
       ui.src.textContent = '';
-      var all = el('option', null, 'Alle Quellen'); all.value = '*'; ui.src.appendChild(all);
+      var all = el('option', null, T('all_sources')); all.value = '*'; ui.src.appendChild(all);
       sessions.forEach(function (x) { var o = el('option', null, x.source || x.id); o.value = x.id; ui.src.appendChild(o); });
       var known = selSession === '*' || sessions.some(function (x) { return x.id === selSession; });
       ui.src.value = known ? selSession : '*';
@@ -1406,8 +1607,8 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     setText(ui.cntSeen, nS);
     show(ui.emptySeen, nS === 0 && nC === 0);
     show(ui.secSeen, nS > 0 || nC === 0);
-    setText(ui.emptySeen, onlyUnsure && tiles.size > 0 ? 'Keine unsicheren Karten.' :
-      view.sessions === 0 ? 'Keine Quelle aktiv – Filter „TCG Card Lens“ in OBS hinzufügen.' : 'Keine Karten im Bild.');
+    setText(ui.emptySeen, T(onlyUnsure && tiles.size > 0 ? 'no_unsure' :
+      view.sessions === 0 ? 'no_source' : 'no_cards'));
 
     fvUpdate(); // Vorschau steht über den Kacheln → Höhenänderungen fängt der Anker unten mit ab
 
@@ -1513,14 +1714,14 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
   // Quellen-Wahl in der Vorschau, nur bei „Alle Quellen“ mit mehreren Quellen
   function fvTabs() {
     var list = view.multi ? fvSessions() : [];
-    var sig = list.map(function (x) { return x.id + '\u0001' + (x.source || ''); }).join('\u0002') + '|' + fv.sid;
+    var sig = list.map(function (x) { return x.id + '\u0001' + (x.source || ''); }).join('\u0002') + '|' + fv.sid + '|' + LANG;
     if (sig === fvUi.tabs._sig) return;
     fvUi.tabs._sig = sig;
     fvUi.tabs.textContent = '';
     list.forEach(function (x) {
       var b = el('button', 'btn sm', x.source || x.id);
       b.type = 'button';
-      b.title = 'Kamerabild von „' + (x.source || x.id) + '“ zeigen';
+      b.title = T('fv_tab_title', { src: x.source || x.id });
       b.setAttribute('aria-pressed', x.id === fv.sid ? 'true' : 'false');
       b.addEventListener('click', function () {
         fv.pick = x.id;
@@ -1534,8 +1735,8 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
   }
 
   function fvEmpty() {
-    var msg = !fv.frame || (!fv.hasImg && fv.errs >= 2) ? 'Noch kein Kamerabild' :
-      !fv.hasImg ? 'Kamerabild wird geladen …' : '';
+    var msg = !fv.frame || (!fv.hasImg && fv.errs >= 2) ? T('fv_none') :
+      !fv.hasImg ? T('fv_loading') : '';
     setText(fvUi.empty, msg);
     show(fvUi.empty, !!msg);
   }
@@ -1711,8 +1912,7 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     var e = fv.els.get(k), lab = e && e.tr ? e.tr.label : k;
     var t = tiles.get(fv.sid + '|' + k);
     if (!t || !t.el || !t.el.isConnected || !t.visible) {
-      toast(onlyUnsure && t ? 'Karte ' + lab + ' ist ausgeblendet („nur unsichere“).' :
-        'Karte ' + lab + ' steht noch nicht im Dock.', 'ok');
+      toast(T(onlyUnsure && t ? 'tile_hidden' : 'tile_missing', { lab: lab }), 'ok');
       return;
     }
     try { t.el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (x) { t.el.scrollIntoView(); }
@@ -1748,7 +1948,7 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     if (!fv.frame) return;
     if (ev.pointerType === 'mouse' && ev.button !== 0) return;
     if (fv.drag) fvCancelDrag(); // verpasstes Loslassen (z. B. außerhalb des Docks)
-    if (fv.busy) { toast('Suche läuft noch …', 'ok'); return; }
+    if (fv.busy) { toast(T('probe_busy'), 'ok'); return; }
     var p = fvPos(ev);
     var g = ev.target && ev.target.closest ? ev.target.closest('.trk') : null;
     fv.drag = { id: ev.pointerId, x0: p.x, y0: p.y, x: p.x, y: p.y, W: p.W, H: p.H, moved: false,
@@ -1776,7 +1976,7 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     try { fvUi.wrap.releasePointerCapture(d.id); } catch (e) { /* egal */ }
     if (d.moved) { fvProbeRect(d); return; }
     svgShow(fvUi.drag, false);
-    if (fv.rectMode) { toast('Maustaste gedrückt halten und einen Rahmen um die Karte ziehen.', 'ok'); return; }
+    if (fv.rectMode) { toast(T('rect_hold'), 'ok'); return; }
     if (d.track) { fvFocusTile(d.track); return; }
     fvProbePoint(d);
   });
@@ -1803,7 +2003,7 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     // Mindestgröße: 2 % der Bildbreite in beiden Richtungen
     if (x1 - x0 < FV_MIN_RECT || (y1 - y0) * d.H < FV_MIN_RECT * d.W) {
       svgShow(fvUi.drag, false);
-      toast('Rahmen zu klein – bitte größer um die Karte ziehen.');
+      toast(T('rect_small'));
       return;
     }
     fvSetRectMode(false);
@@ -1817,18 +2017,17 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     post('/api/probe', body).then(function (res) {
       if (res.found) {
         var lab = res.label || '?';
-        toast(res.how === 'vorhanden' ? 'Karte ' + lab + ' liegt dort schon – wird neu erkannt.' :
-          'Karte gefunden: ' + lab, 'ok');
+        toast(T(res.how === 'vorhanden' ? 'probe_exists' : 'probe_found', { lab: lab }), 'ok');
         fv.flash = { sid: sid, track: res.track != null ? String(res.track) : null, label: res.label,
           until: Date.now() + FV_FLASH_MS };
         setTimeout(function () { if (fv.open) fvRender(); }, FV_FLASH_MS + 50);
         fvSetRectMode(false);
       } else {
-        toast(res.error || 'Keine Karte gefunden – Rahmen um die Karte ziehen');
+        toast(res.error || T('probe_none'));
         if (sid === fv.sid) fvSetRectMode(true); // Rahmen-Modus anbieten
       }
     }, function (err) {
-      toast('Fehler: ' + (err && err.message ? err.message : 'Suche fehlgeschlagen'));
+      toast(T('error', { msg: err && err.message ? err.message : T('probe_failed') }));
     }).then(function () {
       fv.busy = false;
       fvUi.wrap.classList.remove('busy');

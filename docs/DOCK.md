@@ -17,6 +17,27 @@ OBS ──(Filter, TCP 47820)──► Engine ◄──(HTTP 47830, JSON)── 
   Dock offen ist, also in den letzten 5 s abgefragt hat), `always` oder `never`.
 - Fährt man im Dock über eine Karte, wird sie im Video **hervorgehoben** (pulsierender, dickerer Rahmen).
 
+## Sprache (Deutsch/Englisch)
+
+Dock und Session-Anzeige folgen der **OBS-Sprache**: Das Plugin meldet `obs_get_locale()` als `ui_language`
+(docs/PLUGIN.md), `/api/state` liefert daraus je Sitzung `ui_language` (`"de"`/`"en"`) und `ui_locale` (Rohwert,
+z. B. `"en-US"`, bei alten Plugins `"de"`) sowie global `ui_language` = Sprache der ersten Sitzung (`null` ohne
+Sitzung). Deutsch, wenn die Locale mit `de` beginnt, sonst Englisch.
+
+- **`?lang=de|en`** an der Dock- bzw. Session-URL legt die Sprache fest (z. B. `http://127.0.0.1:47830/?lang=en`).
+  Ohne Angabe nimmt das Dock die Sprache aus `/api/state`; solange keine Quelle verbunden ist, die zuletzt benutzte
+  (localStorage `tcl.dock.lang`), sonst die Browser-Sprache.
+- Alle Texte stehen in einem Wörterbuch im Script (`I18N` in dock.html, `TEXT` in session.html); `<html lang>`,
+  Preise, Prozente und Uhrzeiten richten sich nach der Sprache (`Intl` mit `de-DE` bzw. `en-US`).
+- Das Dock hängt seine Sprache als `?lang=` an alle Anfragen (`/api/state`, POSTs, CSV-Download). Die Engine liefert
+  damit Gründe (`reason`), `status`, „Unbekannte Karte“ und Fehlermeldungen (`error`) in dieser Sprache; ohne
+  `lang` gilt die Sprache der Sitzung. Auch `"lang"` im POST-Body wird akzeptiert.
+- Wechselt die Sprache (z. B. OBS-Sprache umgestellt), setzt das Dock alle Texte neu; Kacheln, mit denen gerade
+  gearbeitet wird, bleiben eingefroren (Inhalt, Suchtext, Fokus und Position bleiben – nur die Beschriftung wechselt).
+- Die CSV folgt ebenfalls der Sprache (siehe unten). Die Sprache der **Kartennamen** ist davon unabhängig
+  (Filtereinstellung „Anzeigesprache“, `display_language`).
+- Mock: `python tools/dock_mock.py --lang en` (bzw. `en-US`, `de`) simuliert die OBS-Sprache.
+
 ## HTTP-API (alles JSON, UTF-8)
 
 ### `GET /api/state`
@@ -25,13 +46,16 @@ Polling alle ~500 ms. Antwort:
 ```json
 {
   "engine": "0.2.0",
-  "status": "bereit",
+  "status": "bereit",                   // in der Sprache der Anfrage (?lang=) bzw. der ersten Sitzung
+  "ui_language": "de",                  // Sprache der Oberfläche (erste Sitzung), null ohne Sitzung
   "learned": {"references": 12, "negatives": 3, "dataset": 15},
   "dock_rev": "1792233686",             // ändert sich mit dock.html → Dock lädt sich selbst neu
   "sessions": [
     {
       "id": "s1",                       // Sitzungs-ID (eine je OBS-Filterinstanz)
       "source": "Kamera Tisch",
+      "ui_language": "de",              // "de" | "en" – aus der OBS-Sprache dieser Filterinstanz
+      "ui_locale": "de-DE",             // Rohwert vom Plugin
       "highlight": "B",                 // aktuell hervorgehobenes Kennzeichen oder null
       "cards": [
         {
@@ -46,7 +70,7 @@ Polling alle ~500 ms. Antwort:
           "set_name": "151", "set_code": "MEW", "number": "025/165",
           "similarity": 0.81,
           "method": "embedding",        // embedding | embedding+ocr | gelernt | bestätigt
-          "reason": "geringe Ähnlichkeit",
+          "reason": "geringe Ähnlichkeit",  // übersetzt (en: "low similarity")
           "image": "/api/card-image/pokemon/sv3pt5-25",   // Referenzbild aus den lokalen Daten
           "crop": "/api/crop/s1/17?v=3",                  // aktueller Kamera-Ausschnitt (entzerrt, JPEG)
           "cardmarket_url": "https://www.cardmarket.com/de/Pokemon/Products?idProduct=123456",
@@ -197,9 +221,10 @@ die Karte keinen Cardmarket-Preis hat. Gezählt werden nur sicher erkannte Karte
 | `/api/pack/remove` | `{"session", "entry"}` | Eintrag (`cards[].id`) entfernen. Meldet derselbe Track die Karte danach erneut, zählt sie wieder. |
 
 ### `GET /api/pack/csv/<session>`
-Download der aktuellen Session (`text/csv`, `Content-Disposition: attachment`).
+Download der aktuellen Session (`text/csv`, `Content-Disposition: attachment`); `?lang=de|en` wählt das Format,
+sonst die Sprache der Sitzung (gilt ebenso für `/api/pack/export` und die Sicherung bei `/api/pack/reset`).
 
-**CSV-Format** (für deutsches Excel): UTF-8 mit BOM, Trennzeichen `;`, Dezimalkomma, Zeilenende CRLF, eine Kopfzeile:
+**CSV-Format Deutsch** (für deutsches Excel): UTF-8 mit BOM, Trennzeichen `;`, Dezimalkomma, Zeilenende CRLF, eine Kopfzeile:
 
 ```
 Zeit;Spiel;Karte;Set;Nummer;Variante;Preis;Währung;Hit;Schlüssel
@@ -207,6 +232,9 @@ Zeit;Spiel;Karte;Set;Nummer;Variante;Preis;Währung;Hit;Schlüssel
 ```
 
 `Preis` ist leer, wenn kein Preis vorliegt; `Hit` ist `ja` oder leer.
+
+**Englisch:** Trennzeichen `,`, Dezimalpunkt, Kopfzeile `Time,Game,Card,Set,Number,Variant,Price,Currency,Hit,Key`,
+`Hit` ist `yes` oder leer.
 
 ## Session-Anzeige (Pack-Opening) als eigene Szenen-Quelle
 
@@ -216,5 +244,6 @@ zuschneidbar. Am einfachsten über den Knopf **„Session-Anzeige zur aktuellen 
 „Pack-Opening“ – der legt die Browser-Quelle mit der richtigen Adresse an.
 
 URL-Parameter: `source=<Quelle mit dem Filter>` (ohne: erste Quelle mit aktivem Pack-Opening), `show=total,hits,count`,
-`hits=3`, `scale=1`, `align=left|right`, `bg=0|1` (halbtransparente Kästen). Die Seite fragt `/api/state?overlay=1` ab –
+`hits=3`, `scale=1`, `align=left|right`, `bg=0|1` (halbtransparente Kästen), `lang=de|en` (Standard: Sprache der
+Quelle, d. h. OBS-Sprache). Die Seite fragt `/api/state?overlay=1` ab –
 `overlay=1` zählt nicht als „Dock offen“, die Kennzeichen A, B … erscheinen dadurch nicht im Video.

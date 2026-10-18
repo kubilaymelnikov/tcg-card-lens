@@ -33,8 +33,8 @@ die Inferenz per ONNX Runtime ins Plugin wandern, ohne das Protokoll zu ändern.
 
 | Typ | Felder |
 |---|---|
-| `hello` | `proto`, `instance`, `source` (Quellname), `shm`, `shm_size`, `slot_size`, `settings` |
-| `settings` | `settings` (bei jeder Änderung vollständig) |
+| `hello` | `proto`, `instance`, `source` (Quellname), `shm`, `shm_size`, `slot_size`, `settings`, `ui_language` |
+| `settings` | `settings` (bei jeder Änderung vollständig, enthält `ui_language`) |
 | `frame` | `seq`, `slot`, `width`, `height`, `stride`, `ts` – Bild liegt im Slot; Engine verarbeitet nur das jeweils neueste |
 | `snapshot` | manueller Debug-Snapshot (Button) |
 | `pack_reset` | Pack-Opening: neue Session für diese Quelle (Button „Neue Session starten“) |
@@ -47,6 +47,16 @@ die Inferenz per ONNX Runtime ins Plugin wandern, ohne das Protokoll zu ändern.
 | `welcome` | `proto`, `engine`, `status` |
 | `result` | `seq`, `tracks: [{id, corners: [[x,y]×4] (Analyse-Koordinaten), color: [r,g,b], thickness, panels: [{key, ver, anchor: "top"|"bottom", w, h, data?}]}]`, `status` |
 | `status` | `text` (z. B. „Modelle werden geladen“, „Preise: Stand 17.10.“) |
+
+**Sprache der Oberfläche (`ui_language`):** Das Plugin sendet `obs_get_locale()` (z. B. `"de-DE"`, `"en-US"`) in
+jeder `settings`-Nachricht (Feld `settings.ui_language`) und zusätzlich direkt im `hello`. Die Engine wählt daraus
+Deutsch (Locale beginnt mit `de`) oder Englisch (alle anderen) für alles, was sie rendert oder meldet: Overlay-Panels
+(„Druck unsicher – kein Preis“ / „Print uncertain – no price“, Gründe, „ab …“ / „from …“, Tage-Achse, Hit-Banner,
+Session-Panels), `status`/`welcome`-Texte, Gründe und Fehlermeldungen im Dock; Preise locale-gerecht (`0,15 €` /
+`€0.15`). Fehlt das Feld (ältere Plugins), bleibt alles deutsch. Umsetzung: `cardengine/i18n.py` – Gründe und
+Statusmeldungen werden als `Msg` (deutscher Text + Schlüssel/Parameter) gespeichert und erst bei der Ausgabe
+übersetzt; unbekannte Texte werden unverändert ausgegeben. Die Texte des Plugins selbst (Eigenschaften, eigene
+Statusmeldungen) stehen in `data/locale/de-DE.ini` bzw. `en-US.ini`.
 
 Panel-Bilder (`data`, RGBA, Base64) werden nur gesendet, wenn sich `ver` für einen `key` ändert; das Plugin
 hält eine Textur je `key` vor. Positionen berechnet das Plugin pro Frame aus den Ecken (Name über, Preis unter der Karte).
@@ -70,7 +80,7 @@ hält eine Textur je `key` vor. Positionen berechnet das Plugin pro Frame aus de
 | | Haltezeit bei Verlust (s), Glättung | Tracking-Verhalten |
 | | Analyse-Bildrate | Wie oft Bilder an die Engine gehen (5–30/s) |
 | Sprachen | Kartennamen laden: Deutsch, Englisch, Französisch, Italienisch, Spanisch, Portugiesisch, Japanisch | Namen (und künftig Referenzbilder) dieser Sprachen werden geladen |
-| | Anzeigesprache | Sprache des Namens im Overlay (Fallback Englisch) |
+| | Anzeigesprache | Sprache des Namens im Overlay (Fallback Englisch) – unabhängig von der Oberflächensprache, die der OBS-Sprache folgt (`ui_language`) |
 | Overlay | Kartenname / Preis / Preisverlauf anzeigen | |
 | | Zeitraum Preisverlauf (30/90/180 Tage) | |
 | | Skalierung, Rahmenstärke, Farbe Pokémon, Farbe Magic, Farbe Yu-Gi-Oh | |

@@ -13,6 +13,7 @@
     scale=1                                        Schriftgröße
     align=left|right                               Ausrichtung
     bg=0|1                                         halbtransparenter Hintergrund (Standard 1)
+    lang=de|en                                     Sprache (Standard: OBS-Sprache aus der Engine)
   Hintergrund der Seite ist transparent.
 -->
 <style>
@@ -71,13 +72,13 @@
 <body class="bg">
 <div class="wrap">
   <div class="box" id="totalBox">
-    <span class="label">Session-Wert</span>
+    <span class="label" id="lblTotal">Session-Wert</span>
     <span class="total" id="total">–</span>
     <span class="count" id="count"></span>
   </div>
   <div class="box" id="hitsBox">
-    <span class="label">Letzte Hits</span>
-    <div class="hits" id="hits"><span class="empty">noch keine</span></div>
+    <span class="label" id="lblHits">Letzte Hits</span>
+    <div class="hits" id="hits"><span class="empty" id="none">noch keine</span></div>
   </div>
 </div>
 <div class="banner" id="banner"></div>
@@ -97,9 +98,32 @@
   el('hitsBox').hidden = show.indexOf('hits') < 0;
   el('count').hidden = show.indexOf('count') < 0 && show.indexOf('total') < 0;
 
-  var euro = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
+  // Sprache: ?lang=de|en, sonst die der Quelle (ui_language aus /api/state = OBS-Sprache), sonst Deutsch
+  var TEXT = {
+    de: { total: 'Session-Wert', hits: 'Letzte Hits', none: 'noch keine', card_one: 'Karte', card_many: 'Karten',
+          hit_one: 'Hit', hit_many: 'Hits' },
+    en: { total: 'Session value', hits: 'Recent hits', none: 'none yet', card_one: 'card', card_many: 'cards',
+          hit_one: 'hit', hit_many: 'hits' }
+  };
+  var urlLang = (q.get('lang') || '').toLowerCase();
+  urlLang = urlLang === 'de' || urlLang === 'en' ? urlLang : null;
+  var lang = null, T = TEXT.de, euro = null;
+  function normLang(v) { return typeof v === 'string' && v ? (v.toLowerCase().indexOf('de') === 0 ? 'de' : 'en') : null; }
+  function setLang(l) {
+    if (l === lang) return;
+    lang = l;
+    T = TEXT[l];
+    document.documentElement.lang = l;
+    euro = new Intl.NumberFormat(l === 'de' ? 'de-DE' : 'en-US', { style: 'currency', currency: 'EUR' });
+    el('lblTotal').textContent = T.total;
+    el('lblHits').textContent = T.hits;
+    var none = el('none');
+    if (none) none.textContent = T.none;
+    lastSig = '';
+  }
   var seenHits = null; // Eintrags-IDs bereits gezeigter Hits (erste Abfrage löst keine Animation aus)
   var lastSig = '';
+  setLang(urlLang || 'de');
 
   function pick(sessions) {
     var withPack = sessions.filter(function (s) { return s && s.pack; });
@@ -115,12 +139,12 @@
     if (sig === lastSig) return hits;
     lastSig = sig;
     el('total').textContent = euro.format(total);
-    el('count').textContent = cards.length + (cards.length === 1 ? ' Karte' : ' Karten') +
-      (hits.length ? ' · ' + hits.length + (hits.length === 1 ? ' Hit' : ' Hits') : '');
+    el('count').textContent = cards.length + ' ' + (cards.length === 1 ? T.card_one : T.card_many) +
+      (hits.length ? ' · ' + hits.length + ' ' + (hits.length === 1 ? T.hit_one : T.hit_many) : '');
     var box = el('hits');
     box.textContent = '';
     if (!hits.length) {
-      var e = document.createElement('span'); e.className = 'empty'; e.textContent = 'noch keine'; box.appendChild(e);
+      var e = document.createElement('span'); e.className = 'empty'; e.id = 'none'; e.textContent = T.none; box.appendChild(e);
     }
     hits.slice(0, nHits).forEach(function (c) {
       var row = document.createElement('div'); row.className = 'hit';
@@ -149,10 +173,14 @@
     var ctl = window.AbortController ? new AbortController() : null;
     var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 3000);
     // overlay=1: zählt nicht als „Dock offen“ (sonst stünden die Kennzeichen A, B … dauerhaft im Video)
-    fetch('/api/state?overlay=1', { cache: 'no-store', signal: ctl ? ctl.signal : undefined })
+    fetch('/api/state?overlay=1' + (urlLang ? '&lang=' + urlLang : ''), { cache: 'no-store', signal: ctl ? ctl.signal : undefined })
       .then(function (r) { return r.json(); })
       .then(function (s) {
         var sess = pick(Array.isArray(s.sessions) ? s.sessions : []);
+        if (!urlLang) {
+          var l = normLang(sess && sess.ui_language) || normLang(s.ui_language);
+          if (l) setLang(l);
+        }
         var hits = render(sess ? sess.pack : null);
         var ids = hits.map(function (c) { return c.id; });
         if (seenHits !== null) {
