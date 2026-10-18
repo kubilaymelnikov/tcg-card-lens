@@ -109,6 +109,7 @@ std::string settings_to_json(obs_data_t *s)
 		langs.push_back("en");
 	json j = {
 		{"enabled", obs_data_get_bool(s, "enabled")},
+		{"auto_detect", obs_data_get_bool(s, "auto_detect")},
 		{"games", games_setting(s)},
 		{"mode", obs_data_get_string(s, "mode")},
 		{"sensitivity", obs_data_get_double(s, "sensitivity")},
@@ -204,6 +205,7 @@ void filter_destroy(void *data)
 void filter_defaults(obs_data_t *s)
 {
 	obs_data_set_default_bool(s, "enabled", true);
+	obs_data_set_default_bool(s, "auto_detect", true);
 	obs_data_set_default_bool(s, "game_pokemon", true);
 	obs_data_set_default_bool(s, "game_mtg", true);
 	obs_data_set_default_bool(s, "game_ygo", true); // ohne installierte Yu-Gi-Oh-Daten sucht die Engine dort einfach nichts
@@ -342,6 +344,7 @@ obs_properties_t *filter_properties(void *data)
 	// Allgemein
 	obs_properties_t *g = obs_properties_create();
 	obs_properties_add_bool(g, "enabled", obs_module_text("Enabled"));
+	obs_properties_add_bool(g, "auto_detect", obs_module_text("AutoDetect"));
 	obs_properties_add_text(g, "games_label", obs_module_text("Games"), OBS_TEXT_INFO);
 	for (auto &game : kGames)
 		obs_properties_add_bool(g, (std::string("game_") + game[0]).c_str(), game[1]);
@@ -519,9 +522,44 @@ void hit_task(void *param)
 	}
 }
 
+// Einstellungsänderung aus dem Dock in die Filtereigenschaften übernehmen (UI-Thread). obs_source_update ruft
+// danach wie bei einer Änderung im Eigenschaftenfenster `update` auf – so bekommt auch die Engine den neuen Stand.
+struct SettingsPatchTask {
+	obs_source_t *source; // eigene Referenz, wird im Task freigegeben
+	std::string patch;
+};
+
+void settings_patch_task(void *param)
+{
+	std::unique_ptr<SettingsPatchTask> t(static_cast<SettingsPatchTask *>(param));
+	json p = json::parse(t->patch, nullptr, false);
+	if (p.is_object()) {
+		obs_data_t *d = obs_data_create();
+		for (auto it = p.begin(); it != p.end(); ++it) {
+			if (it->is_boolean())
+				obs_data_set_bool(d, it.key().c_str(), it->get<bool>());
+			else if (it->is_number_integer())
+				obs_data_set_int(d, it.key().c_str(), it->get<long long>());
+			else if (it->is_number())
+				obs_data_set_double(d, it.key().c_str(), it->get<double>());
+			else if (it->is_string())
+				obs_data_set_string(d, it.key().c_str(), it->get<std::string>().c_str());
+		}
+		obs_source_update(t->source, d);
+		obs_data_release(d);
+		obs_log(LOG_INFO, "Einstellungen aus dem Dock übernommen: %s", t->patch.c_str());
+	}
+	obs_source_release(t->source);
+}
+
 void filter_tick(void *data, float)
 {
 	auto *f = static_cast<Filter *>(data);
+	const std::string patch = f->client->take_settings_patch();
+	if (!patch.empty()) {
+		if (obs_source_t *ref = obs_source_get_ref(f->source))
+			obs_queue_task(OBS_TASK_UI, settings_patch_task, new SettingsPatchTask{ref, patch}, false);
+	}
 	std::vector<HitEvent> events = f->client->take_events();
 	if (!events.empty() && f->pack_enabled) {
 		const HitEvent &e = events.back();

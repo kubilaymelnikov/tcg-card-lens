@@ -114,6 +114,9 @@ class DockApi:
             cards.sort(key=lambda c: (len(c["label"]), c["label"]))
             entry = {"id": sess.sid, "source": sess.source, "highlight": sess.current_highlight(), "cards": cards}
             entry.update(self._preview(sess))
+            entry["settings"] = {"auto_detect": bool(sess.settings.get("auto_detect", True)),
+                                 "pack_enabled": bool(sess.settings.get("pack_enabled", False)),
+                                 "pack_threshold": float(sess.settings.get("pack_threshold", 10.0))}
             entry["pack"] = self._pack_state(sess)
             sessions.append(entry)
         try:
@@ -602,6 +605,13 @@ def _handler(api: DockApi):
                     return self._json(api.confirm(body["session"], body["track"], body["key"]))
                 if path == "/api/reject":
                     return self._json(api.reject(body["session"], body["track"]))
+                if path == "/api/settings":
+                    sess = api._session(body["session"])
+                    if sess is None:
+                        return self._json({"ok": False, "error": "Quelle nicht verbunden"})
+                    changed = sess.patch_settings({k: v for k, v in body.items() if k != "session"})
+                    return self._json({"ok": bool(changed), "changed": changed} if changed
+                                      else {"ok": False, "error": "keine änderbare Einstellung"})
                 if path == "/api/probe":
                     return self._json(api.probe(body["session"], body))
                 if path == "/api/rotate":

@@ -208,6 +208,14 @@ std::vector<PanelImage> EngineClient::take_panel_updates()
 	return out;
 }
 
+std::string EngineClient::take_settings_patch()
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	std::string out;
+	out.swap(settings_patch_);
+	return out;
+}
+
 std::vector<HitEvent> EngineClient::take_events()
 {
 	std::lock_guard<std::mutex> lock(mutex_);
@@ -413,6 +421,18 @@ void EngineClient::handle_message(const std::string &text)
 	if (type == "welcome" || type == "status") {
 		std::lock_guard<std::mutex> lock(mutex_);
 		status_ = type == "welcome" ? "Verbunden – " + msg.value("status", "") : msg.value("text", "");
+		return;
+	}
+	if (type == "settings_patch") {
+		// Schalter im Dock: der Filter übernimmt sie in seine Eigenschaften (UI-Thread, siehe filter_tick)
+		if (msg.contains("settings") && msg["settings"].is_object()) {
+			std::lock_guard<std::mutex> lock(mutex_);
+			json merged = settings_patch_.empty() ? json::object() : json::parse(settings_patch_, nullptr, false);
+			if (merged.is_discarded())
+				merged = json::object();
+			merged.update(msg["settings"]);
+			settings_patch_ = merged.dump();
+		}
 		return;
 	}
 	if (type != "result")

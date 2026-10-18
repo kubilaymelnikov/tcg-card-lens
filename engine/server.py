@@ -38,6 +38,7 @@ HEADER = 64
 
 DEFAULT_SETTINGS = {
     "enabled": True,
+    "auto_detect": True,  # aus: Detektor sucht nicht selbst, Karten nur gezielt per Klick/Rahmen im Dock
     "games": "both",  # both (= Pokémon + Magic) | all | pokemon | mtg | ygo | Liste/Kommaliste, z. B. "pokemon,ygo"
     "mode": "facecam",  # facecam | table
     "sensitivity": 0.4,  # Detektor-Schwelle 0..1
@@ -246,6 +247,7 @@ class Session:
             cfg.smoothing = float(np.clip(st["smoothing"], 0, 0.9))
             self.pipeline.tracker.cfg = cfg
             self.pipeline.min_score = float(st["sensitivity"])
+            self.pipeline.auto_detect = bool(st.get("auto_detect", True))
             self.pipeline.game = parse_games(st["games"])
         self.overlay = OverlayRenderer(
             scale=float(st["scale"]), show_name=bool(st["show_name"]), show_price=bool(st["show_price"]),
@@ -322,6 +324,21 @@ class Session:
         for e in events:
             print(f"[engine] {self.source}: HIT {e['name']} {e['price']:.2f} {e['currency']}", flush=True)
         return events
+
+    # Schalter im Dock, die zu den Filtereinstellungen gehören: lokal sofort anwenden und dem Plugin melden, damit es
+    # sie in seine Eigenschaften übernimmt (dann stimmen Dock, Filterfenster und gespeicherte Szene überein)
+    DOCK_SETTINGS = {"auto_detect": bool, "pack_enabled": bool, "pack_threshold": float}
+
+    def patch_settings(self, changes: dict) -> dict:
+        clean = {k: self.DOCK_SETTINGS[k](v) for k, v in changes.items() if k in self.DOCK_SETTINGS}
+        if not clean:
+            return {}
+        self.apply_settings({**self.settings, **clean})
+        try:
+            send(self.sock, {"type": "settings_patch", "settings": clean}, self.send_lock)
+        except OSError:
+            pass
+        return clean
 
     def pack_reset(self) -> None:
         with self.shared.pack_lock:

@@ -73,6 +73,8 @@ public:
 	std::vector<HitEvent> take_events(); // Hit-Ereignisse seit dem letzten Aufruf (gehen nicht verloren, wenn
 					     // ein Ergebnis vom nächsten überholt wird)
 	std::string status();
+	// Einstellungsänderung aus dem Dock (JSON-Objekt, z. B. {"auto_detect": false}); leer, wenn keine anliegt
+	std::string take_settings_patch();
 	bool connected() const { return connected_.load(); }
 
 	static constexpr int kMaxWidth = 1920;
@@ -109,6 +111,7 @@ private:
 	ResultFrame result_;
 	std::vector<PanelImage> panel_updates_;
 	std::vector<HitEvent> events_;
+	std::string settings_patch_; // noch nicht übernommene Einstellungsänderung aus dem Dock
 	std::string status_ = "Engine nicht verbunden";
 	bool autostart_ = false;
 	std::string autostart_cmd_;

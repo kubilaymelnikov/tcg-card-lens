@@ -156,6 +156,7 @@ class CardPipeline:
         self._cmd_lock = threading.Lock()
         self.tracker = CardTracker(tracker_config)
         self.detect_interval = 1.0 / detect_hz
+        self.auto_detect = True  # aus: kein regelmäßiger Detektor-Lauf, Karten nur über probe() (Dock)
         self.stats = PipelineStats()
         self._last_detect = 0.0
         self._detect_times: list[float] = []
@@ -209,7 +210,7 @@ class CardPipeline:
 
         self._refine_edges(frame, tracks)
         interval = self._current_detect_interval(now, tracks)
-        if now - self._last_detect >= interval and self._det_worker.submit((frame.copy(), now)):
+        if self.auto_detect and now - self._last_detect >= interval and self._det_worker.submit((frame.copy(), now)):
             self._last_detect = now
 
         if self._id_worker:

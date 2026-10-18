@@ -56,6 +56,25 @@ header {
 }
 .ctrl input[type=checkbox] { accent-color: var(--accent); margin: 0; }
 .ctrl label { display: flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; }
+.modes { gap: 12px; padding-top: 2px; }
+.sw { position: relative; gap: 6px !important; color: var(--text, #e6e8ee); }
+.sw input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.sw .knob {
+  width: 26px; height: 14px; border-radius: 7px; background: #4a4f5c; position: relative; flex: none;
+  transition: background .15s;
+}
+.sw .knob::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%;
+  background: #e6e8ee; transition: transform .15s;
+}
+.sw input:checked + .knob { background: var(--accent, #4c8dff); }
+.sw input:checked + .knob::after { transform: translateX(12px); }
+.sw input:focus-visible + .knob { box-shadow: 0 0 0 2px var(--accent, #4c8dff); }
+.sw input:indeterminate + .knob { background: #7a6a2a; }
+#pack-thr {
+  width: 64px; background: #1b1d23; color: inherit; border: 1px solid #3a3e4b; border-radius: 4px;
+  padding: 1px 4px; font: inherit;
+}
 .spacer { flex: 1 1 auto; }
 
 .offline {
@@ -335,6 +354,11 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     <span class="spacer"></span>
     <label><input type="checkbox" id="unsure"> nur unsichere</label>
   </div>
+  <div class="hrow ctrl modes" id="modes" hidden>
+    <label class="sw" title="Aus: Der Kartenfinder sucht nicht selbst – Karten nur gezielt per Klick oder Rahmen im Kamerabild"><input type="checkbox" id="sw-auto"><span class="knob"></span>Automatisch erkennen</label>
+    <label class="sw" title="Hits erkennen, Session-Wert zählen (Pack-Opening)"><input type="checkbox" id="sw-pack"><span class="knob"></span>Pack-Opening</label>
+    <span id="thr-wrap" hidden>Hit ab <input type="number" id="pack-thr" min="0.01" step="0.05" aria-label="Hit-Schwelle in Euro"> €</span>
+  </div>
 </header>
 <div class="offline" id="offline" hidden>Engine nicht erreichbar – startet OBS-Filter? Neuer Versuch läuft …</div>
 <main id="main">
@@ -518,6 +542,7 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
   var ui = {
     dot: $('dot'), status: $('status'), learned: $('learned'), srcWrap: $('src-wrap'), src: $('src'),
     unsure: $('unsure'), offline: $('offline'), main: $('main'),
+    modes: $('modes'), swAuto: $('sw-auto'), swPack: $('sw-pack'), thrWrap: $('thr-wrap'), thr: $('pack-thr'),
     secConfirm: $('sec-confirm'), gridConfirm: $('grid-confirm'), cntConfirm: $('cnt-confirm'),
     secSeen: $('sec-seen'), gridSeen: $('grid-seen'), cntSeen: $('cnt-seen'), emptySeen: $('empty-seen')
   };
@@ -1227,7 +1252,62 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
   }
 
   var srcSig = null;
+  // ---------- Schalter im Kopf (Filtereinstellungen über die Engine ans Plugin) ----------
+  var modeHold = 0; // nach eigener Änderung kurz den Engine-Stand ignorieren (Rundlauf über das Plugin)
+  function modeTargets() {
+    var sessions = (state && Array.isArray(state.sessions)) ? state.sessions : [];
+    var withSettings = sessions.filter(function (x) { return x && x.settings; });
+    if (selSession !== '*') {
+      var one = withSettings.filter(function (x) { return x.id === selSession; });
+      if (one.length) return one;
+    }
+    return withSettings;
+  }
+  function renderModes() {
+    var targets = modeTargets();
+    show(ui.modes, targets.length > 0);
+    if (!targets.length || Date.now() < modeHold) return;
+    function apply(box, key) {
+      var vals = targets.map(function (x) { return !!x.settings[key]; });
+      var all = vals.every(Boolean), none = !vals.some(Boolean);
+      box.indeterminate = !all && !none; // gemischt (mehrere Quellen)
+      box.checked = all;
+    }
+    apply(ui.swAuto, 'auto_detect');
+    apply(ui.swPack, 'pack_enabled');
+    var packOn = targets.some(function (x) { return x.settings.pack_enabled; });
+    show(ui.thrWrap, packOn);
+    if (document.activeElement !== ui.thr) {
+      var t = targets[0].settings.pack_threshold;
+      if (typeof t === 'number') ui.thr.value = String(Math.round(t * 100) / 100);
+    }
+  }
+  function sendModes(changes, msg) {
+    var targets = modeTargets();
+    if (!targets.length) return;
+    modeHold = Date.now() + 2500;
+    targets.forEach(function (x) { Object.keys(changes).forEach(function (k) { x.settings[k] = changes[k]; }); });
+    renderModes();
+    Promise.all(targets.map(function (x) {
+      return post('/api/settings', Object.assign({ session: x.id }, changes));
+    })).then(function () { if (msg) toast(msg, 'ok'); pollNow(); },
+      function (e) { modeHold = 0; toast('Einstellung nicht übernommen: ' + (e && e.message || e), 'err'); pollNow(); });
+  }
+  ui.swAuto.addEventListener('change', function () {
+    sendModes({ auto_detect: ui.swAuto.checked },
+      ui.swAuto.checked ? 'Automatische Erkennung an' : 'Automatische Erkennung aus – Karten per Klick/Rahmen im Kamerabild');
+  });
+  ui.swPack.addEventListener('change', function () {
+    sendModes({ pack_enabled: ui.swPack.checked }, ui.swPack.checked ? 'Pack-Opening an' : 'Pack-Opening aus');
+  });
+  ui.thr.addEventListener('change', function () {
+    var v = parseFloat(String(ui.thr.value).replace(',', '.'));
+    if (!(v >= 0.01)) { toast('Schwelle mindestens 0,01 €', 'err'); renderModes(); return; }
+    sendModes({ pack_threshold: Math.round(v * 100) / 100 }, 'Hit ab ' + v.toLocaleString('de-DE', { style: 'currency', currency: 'EUR' }));
+  });
+
   function renderHead() {
+    renderModes();
     var s = state || {};
     var sessions = Array.isArray(s.sessions) ? s.sessions : [];
     show(ui.offline, false);
