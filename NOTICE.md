@@ -4,11 +4,22 @@ TCG Card Lens – Lizenzen und Hinweise
 TCG Card Lens (OBS-Plugin und Engine) ist freie Software unter der GNU Affero General Public License v3.0
 oder später.
 
-Verwendete Modelle (werden bei der Einrichtung heruntergeladen, nicht mitgeliefert)
+Verwendete Modelle (werden bei der Einrichtung heruntergeladen, nicht im Installer enthalten)
 - Kartendetektor „collector-mtg-pkm-detector-yolo11n-obb“ von Matteo Tomei (Open Card Collector),
   trainiert mit Ultralytics YOLO11 – Lizenz AGPL-3.0
 - Karten-Embedder „collector-mtg-pkm-embedder-dinov3-small“ von Matteo Tomei, abgeleitet von Meta DINOv3 –
   DINOv3-Lizenz (https://ai.meta.com/resources/models-and-libraries/dinov3-license/)
+- Beide Modelle verbreitet dieses Projekt zusätzlich in das ONNX-Format umgewandelt als Release-Dateien
+  („tcglens-detector-occ-yolo11n-obb-v1.onnx“, „tcglens-embedder-occ-dinov3s-v1.onnx“; Gewichte unverändert, nur das
+  Format ist umgewandelt). Für diese Dateien gelten dieselben Lizenzen wie für die Originale:
+  - Detektor-ONNX: AGPL-3.0 (wie Ultralytics und die trainierten Gewichte). Quelle der Gewichte:
+    https://huggingface.co/matteot11/collector-mtg-pkm-detector-yolo11n-obb – die Umwandlung ist mit
+    engine/tools/export_onnx.py in diesem Repository nachvollziehbar.
+  - Embedder-ONNX: DINOv3-Lizenz von Meta (Abschnitt 1.b.i): Weitergabe nur unter den Bedingungen dieser Lizenz,
+    mit einer Kopie des Lizenztexts (liegt am Release als „LICENSE-DINOv3.txt“ neben der ONNX-Datei) und dem
+    sichtbaren Hinweis „Built with DINOv3“. Die Nutzungsbeschränkungen der Lizenz gelten weiter (u. a. keine
+    Verwendung für ITAR-/exportkontrollierte oder militärische Zwecke). Built with DINOv3.
+    Quelle: https://huggingface.co/matteot11/collector-mtg-pkm-embedder-dinov3-small
 - Texterkennung: PP-OCR-Modelle über RapidOCR – Apache-2.0
 - Optional: RF-DETR-Seg-Kartenumrisse von Ximilar (cardstream) – Apache-2.0
 

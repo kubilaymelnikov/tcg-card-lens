@@ -4,11 +4,22 @@ TCG Card Lens – Licences and notices
 TCG Card Lens (OBS plugin and engine) is free software under the GNU Affero General Public License v3.0
 or later.
 
-Models used (downloaded during setup, not bundled)
+Models used (downloaded during setup, not included in the installer)
 - Card detector "collector-mtg-pkm-detector-yolo11n-obb" by Matteo Tomei (Open Card Collector),
   trained with Ultralytics YOLO11 – licence AGPL-3.0
 - Card embedder "collector-mtg-pkm-embedder-dinov3-small" by Matteo Tomei, derived from Meta DINOv3 –
   DINOv3 licence (https://ai.meta.com/resources/models-and-libraries/dinov3-license/)
+- This project additionally redistributes both models converted to ONNX as release files
+  ("tcglens-detector-occ-yolo11n-obb-v1.onnx", "tcglens-embedder-occ-dinov3s-v1.onnx"; weights unchanged, only the
+  format is converted). The same licences as for the originals apply:
+  - Detector ONNX: AGPL-3.0 (like Ultralytics and the trained weights). Source of the weights:
+    https://huggingface.co/matteot11/collector-mtg-pkm-detector-yolo11n-obb – the conversion is reproducible with
+    engine/tools/export_onnx.py in this repository.
+  - Embedder ONNX: Meta's DINOv3 licence (section 1.b.i): redistribution only under the terms of that licence,
+    with a copy of the licence text (attached to the release as "LICENSE-DINOv3.txt" next to the ONNX file) and the
+    prominently displayed notice "Built with DINOv3". The licence's use restrictions continue to apply (incl. no use
+    for ITAR/export-controlled or military purposes). Built with DINOv3.
+    Source: https://huggingface.co/matteot11/collector-mtg-pkm-embedder-dinov3-small
 - Text recognition: PP-OCR models via RapidOCR – Apache-2.0
 - Optional: RF-DETR-Seg card outlines by Ximilar (cardstream) – Apache-2.0
 

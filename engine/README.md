@@ -3,17 +3,25 @@
 Erkennt, verfolgt und identifiziert Pokémon- und Magic-Karten im Kamerabild. Später Backend des nativen OBS-Filters.
 Architektur und Entscheidungen: [../docs/ARCHITEKTUR.md](../docs/ARCHITEKTUR.md), [../docs/EVALUATION.md](../docs/EVALUATION.md).
 
-## Installation (Windows, NVIDIA-GPU ab Turing / RTX 20xx)
+## Installation (Windows)
+
+Normalerweise über `setup-engine.ps1` (der Installer ruft es auf): schlank ohne PyTorch, ONNX Runtime passend zur GPU.
 
 ```powershell
-winget install --id Python.Python.3.12 --scope user
-cd tcg-card-lens\engine
-& "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe" -m venv .venv
-.\.venv\Scripts\python.exe -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
-.\.venv\Scripts\python.exe -m pip install "opencv-python<5" numpy requests tqdm pillow pytest ultralytics onnxruntime-gpu onnx rapidocr transformers huggingface_hub
+.\setup-engine.ps1                      # NVIDIA -> CUDA, AMD/Intel -> DirectML, sonst CPU
+.\setup-engine.ps1 -Runtime directml    # kleinste Installation (~0,4 GB), auch für NVIDIA
+.\setup-engine.ps1 -Dev                 # Entwicklung: zusätzlich PyTorch, Ultralytics, Transformers
 ```
 
-Getestet: Python 3.12.10, PyTorch 2.14.1+cu130 (sm_75 enthalten), ONNX Runtime 1.31, Ultralytics 8.4, Treiber 617.42.
+Von Hand: `pip install -r requirements.txt` plus genau ein onnxruntime-Paket (siehe Kopf von requirements.txt);
+für Training/Export/PyTorch-Backend `requirements-dev.txt`. Backend wählen: `TCGLENS_BACKEND=onnx|torch`
+(Standard: PyTorch nur, wenn installiert), Provider: `TCGLENS_ORT_PROVIDER=cuda|dml|cpu`. ONNX-Modelle:
+`python -m cardengine.models_fetch` (Release-Download mit SHA256-Prüfung, sonst lokaler Export mit PyTorch),
+neu exportieren: `python tools/export_onnx.py`, Backends vergleichen: `python tools/compare_backends.py`
+(Details: docs/ARCHITEKTUR.md, Abschnitt 7).
+
+Getestet: Python 3.12.10, ONNX Runtime 1.31 (CUDA 13) bzw. onnxruntime-directml 1.24.4, PyTorch 2.14.1+cu130
+(sm_75 enthalten), Ultralytics 8.4, Treiber 617.42.
 
 ## Daten aufbauen (einmalig, nur lokal – Bilder werden nicht weitergegeben)
 

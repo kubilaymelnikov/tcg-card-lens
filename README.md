@@ -3,7 +3,7 @@
 **Deutsch** · [English](README.en.md)
 
 **OBS-Plugin, das Sammelkarten im Kamerabild erkennt und ihren Cardmarket-Preis einblendet** – für
-**Pokémon**, **Magic: The Gathering** und **Yu-Gi-Oh!**. Läuft lokal auf deiner NVIDIA-GPU, ohne Cloud-Dienst.
+**Pokémon**, **Magic: The Gathering** und **Yu-Gi-Oh!**. Läuft lokal auf deiner Grafikkarte (NVIDIA per CUDA, AMD/Intel per DirectML), ohne Cloud-Dienst.
 
 - Mehrere Karten gleichzeitig, auch schräg, gedreht oder im Toploader
 - Rahmen um jede Karte, darüber der Name (auf Wunsch auf Deutsch), darunter Preis, Trend und Preisverlauf
@@ -19,14 +19,15 @@
 ## Installation (Windows)
 
 Voraussetzungen: Windows 10/11, OBS Studio 32 oder neuer (getestet mit 32.2), NVIDIA-Grafikkarte ab RTX 20xx (Turing) mit aktuellem
-Treiber, etwa 6 GB freier Speicher.
+Treiber – AMD- und Intel-Grafikkarten laufen über DirectML (noch ungetestet), ohne Grafikkarte geht es langsamer auf
+der CPU –, etwa 3 GB freier Speicher.
 
 1. Aus dem [neuesten Release](https://github.com/kubilaymelnikov/tcg-card-lens/releases/latest)
    `TCGCardLens-Setup-<version>.exe` herunterladen und starten (keine Administratorrechte nötig).
    Windows SmartScreen warnt bei unsignierten Programmen: „Weitere Informationen → Trotzdem ausführen“.
 2. Auf der Seite **Spiele und Sprachen** auswählen, was erkannt werden soll und in welchen Sprachen Kartennamen
    angezeigt werden.
-3. Das Setup richtet Python, die KI-Modelle und die Kartendaten ein (einige Minuten, lädt ca. 4 GB).
+3. Das Setup richtet Python, die KI-Modelle und die Kartendaten ein (einige Minuten, lädt ca. 1 GB mit NVIDIA, sonst ca. 0,2 GB).
    Die Erkennungsdaten kommen als fertige Pakete aus dem Release; Kartenbilder werden nicht verteilt.
 4. In OBS: Rechtsklick auf deine Kamera-Quelle → **Filter** → **+** → **TCG Card Lens**.
    Die Engine startet automatisch im Hintergrund.
