@@ -289,6 +289,11 @@ bool EngineClient::connect_once()
 		hello["settings"] = json::parse(settings_json_, nullptr, false);
 		settings_dirty_ = false;
 	}
+	{
+		// Sprache der Oberfläche (steht auch in den Einstellungen; hier zusätzlich direkt im hello)
+		const char *loc = obs_get_locale();
+		hello["ui_language"] = loc && *loc ? loc : "en-US";
+	}
 	if (!send_json(hello.dump())) {
 		disconnect();
 		return false;
@@ -372,7 +377,7 @@ void EngineClient::net_loop()
 			if (!connect_once()) {
 				{
 					std::lock_guard<std::mutex> lock(mutex_);
-					status_ = "Engine nicht erreichbar – wird gesucht …";
+					status_ = obs_module_text("Status.Searching");
 				}
 				if (++failures >= 2)
 					maybe_autostart();
@@ -420,7 +425,8 @@ void EngineClient::handle_message(const std::string &text)
 	const std::string type = msg.value("type", "");
 	if (type == "welcome" || type == "status") {
 		std::lock_guard<std::mutex> lock(mutex_);
-		status_ = type == "welcome" ? "Verbunden – " + msg.value("status", "") : msg.value("text", "");
+		status_ = type == "welcome" ? std::string(obs_module_text("Status.Connected")) + " – " + msg.value("status", "")
+					    : msg.value("text", "");
 		return;
 	}
 	if (type == "settings_patch") {
@@ -496,7 +502,8 @@ void EngineClient::handle_message(const std::string &text)
 		events_.erase(events_.begin(), events_.end() - 32);
 	for (auto &u : updates)
 		panel_updates_.push_back(std::move(u));
-	status_ = "Verbunden – " + msg.value("status", std::string("bereit"));
+	status_ = std::string(obs_module_text("Status.Connected")) + " – " +
+		  msg.value("status", std::string(obs_module_text("Status.Ready")));
 }
 
 void EngineClient::send_loop()

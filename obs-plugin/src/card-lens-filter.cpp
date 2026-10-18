@@ -27,9 +27,9 @@ using json = nlohmann::json;
 
 namespace {
 
-const char *kLanguages[][2] = {{"de", "Deutsch"},      {"en", "Englisch"},      {"fr", "Französisch"},
-			       {"it", "Italienisch"},  {"es", "Spanisch"},      {"pt", "Portugiesisch"},
-			       {"ja", "Japanisch"}};
+// Kartensprachen: Kürzel und Schlüssel der Bezeichnung in data/locale (Lang.de …)
+const char *kLanguages[][2] = {{"de", "Lang.de"}, {"en", "Lang.en"}, {"fr", "Lang.fr"}, {"it", "Lang.it"},
+			       {"es", "Lang.es"}, {"pt", "Lang.pt"}, {"ja", "Lang.ja"}};
 
 // Kartenspiele: je eine Checkbox (Einstellung "game_<kürzel>"), an die Engine als Kommaliste "pokemon,mtg,ygo"
 const char *kGames[][2] = {{"pokemon", "Pokémon"}, {"mtg", "Magic: The Gathering"}, {"ygo", "Yu-Gi-Oh!"}};
@@ -99,6 +99,13 @@ std::string games_setting(obs_data_t *s)
 	return out.empty() ? "both" : out; // nichts gewählt → wie bisher Pokémon + Magic
 }
 
+// Sprache der OBS-Oberfläche, z. B. "de-DE" oder "en-US" (Engine: Deutsch bei "de…", sonst Englisch)
+std::string ui_language()
+{
+	const char *loc = obs_get_locale();
+	return loc && *loc ? loc : "en-US";
+}
+
 std::string settings_to_json(obs_data_t *s)
 {
 	json langs = json::array();
@@ -136,6 +143,8 @@ std::string settings_to_json(obs_data_t *s)
 		{"pack_show_total", obs_data_get_bool(s, "pack_show_total")},
 		{"pack_show_hits", obs_data_get_bool(s, "pack_show_hits")},
 		{"pack_panel_pos", obs_data_get_string(s, "pack_panel_pos")},
+		// Sprache der Oberfläche (Overlay-Texte, Status, Dock) folgt der OBS-Sprache, z. B. "de-DE", "en-US"
+		{"ui_language", ui_language()},
 	};
 	return j.dump();
 }
@@ -362,11 +371,11 @@ obs_properties_t *filter_properties(void *data)
 	// Sprachen
 	obs_properties_t *l = obs_properties_create();
 	for (auto &lang : kLanguages)
-		obs_properties_add_bool(l, (std::string("lang_") + lang[0]).c_str(), lang[1]);
+		obs_properties_add_bool(l, (std::string("lang_") + lang[0]).c_str(), obs_module_text(lang[1]));
 	obs_property_t *disp = obs_properties_add_list(l, "display_language", obs_module_text("DisplayLanguage"),
 						       OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
 	for (auto &lang : kLanguages)
-		obs_property_list_add_string(disp, lang[1], lang[0]);
+		obs_property_list_add_string(disp, obs_module_text(lang[1]), lang[0]);
 	obs_properties_add_group(props, "grp_lang", obs_module_text("Group.Languages"), OBS_GROUP_NORMAL, l);
 
 	// Overlay
@@ -446,7 +455,7 @@ obs_properties_t *filter_properties(void *data)
 	obs_properties_add_int(e, "engine_port", obs_module_text("EnginePort"), 1024, 65535, 1);
 	obs_properties_add_bool(e, "engine_autostart", obs_module_text("EngineAutostart"));
 	obs_properties_add_path(e, "engine_command", obs_module_text("EngineCommand"), OBS_PATH_FILE,
-				"Startskript (*.cmd *.bat *.exe)", nullptr);
+				obs_module_text("EngineCommand.Filter"), nullptr);
 	obs_properties_add_group(props, "grp_engine", obs_module_text("Group.Engine"), OBS_GROUP_NORMAL, e);
 	return props;
 }
