@@ -37,6 +37,17 @@ ASK_MIN_SHOWN_S = 2.0  # kürzer gezeigte Fragen bleiben nicht als „nicht im B
 ASK_RELEASE_S = 10.0  # so lange muss eine gefragte Karte sicher erkannt sein, bevor die Frage von selbst endet
 
 
+def _split_set_code(q: str) -> tuple[str, str | None, str | None]:
+    """Yu-Gi-Oh-Set-Code aus der Suche lösen: „LOB-DE020“ → (Rest, "LOB", "020"). Die Sprachkennung (EN/DE/G …)
+    wird ignoriert – der Katalog führt die EN-Codes, deutsche Karten tragen DE oder G."""
+    import re
+
+    m = re.search(r"(?:^|\s)([A-Za-z0-9]{2,5})-([A-Za-z]{0,2})(\d{1,4})(?=\s|$)", q)
+    if not m:
+        return q, None, None
+    return (q[:m.start()] + " " + q[m.end():]).strip(), m.group(1), m.group(3)
+
+
 def _split_query(q: str) -> tuple[str, str | None, str | None]:
     """„Glurak 4/102“ → ("Glurak", "4", "102"); „Sol Ring 409“ → ("Sol Ring", "409", None)."""
     import re
@@ -506,11 +517,19 @@ class DockApi:
         q = (q or "").strip()
         if cat is None or len(q) < 2:
             return {"results": []}
-        name_q, number, total = _split_query(q)
+        rest, set_code, set_num = _split_set_code(q)
+        name_q, number, total = _split_query(rest) if rest else ("", None, None)
         where, args = [], []
         if game:
             where.append("game = ?")
             args.append(game)
+        if set_code:  # „LOB-EN020“: genau dieser Druck (Nummer im Katalog z. B. "EN020")
+            where.append("upper(set_code) = upper(?) AND (number LIKE ? OR ltrim(number, '0') = ltrim(?, '0'))")
+            args += [set_code, f"%{set_num}", set_num]
+        elif name_q and " " not in name_q and self._is_set_code(name_q, game):
+            where.append("upper(set_code) = upper(?)")  # „LOB“ allein: alle Karten des Sets
+            args.append(name_q)
+            name_q = ""
         if number:
             # Nummern ohne führende Nullen vergleichen ("025" = "25"); Buchstaben-Nummern (CC002, SWSH066) exakt
             where.append("(ltrim(lower(number), '0') = ltrim(lower(?), '0'))")
@@ -532,11 +551,12 @@ class DockApi:
                 for w in words:
                     wids = [cid for g, cid in self.shared.names.find_ids(w) if not game or g == game]
                     wen = self._english_names(wids) if wids else []
-                    part = ("(name LIKE ? OR set_name LIKE ?"
+                    # Wort trifft Name, Set-Name oder Set-Code („Black Luster Ritual DPBC“)
+                    part = ("(name LIKE ? OR set_name LIKE ? OR upper(set_code) = upper(?)"
                             + (f" OR id IN ({','.join('?' * len(wids))})" if wids else "")
                             + (f" OR name IN ({','.join('?' * len(wen))})" if wen else "") + ")")
                     parts.append(part)
-                    cargs += [f"%{w}%", f"%{w}%"] + wids + wen
+                    cargs += [f"%{w}%", f"%{w}%", w] + wids + wen
                 cond += " OR (" + " AND ".join(parts) + ")"
             where.append(f"({cond})")
             args += cargs
@@ -547,6 +567,13 @@ class DockApi:
         return {"results": [{"key": card_key(r.game, r.id), "name": self.shared.names.name_nowait(r, lang),
                              "set_name": r.set_name, "set_code": r.set_code, "number": r.printed_number,
                              "image": self._image_url(card_key(r.game, r.id))} for r in recs]}
+
+    def _is_set_code(self, token: str, game: str | None) -> bool:
+        """Ist das Wort genau ein Set-Code des Katalogs (z. B. „LOB“, „MEW“)? Nur 2–6 Zeichen kommen infrage."""
+        if not 2 <= len(token) <= 6:
+            return False
+        sql = "SELECT 1 FROM cards WHERE upper(set_code) = upper(?)" + (" AND game = ?" if game else "") + " LIMIT 1"
+        return self.catalog.db.execute(sql, (token, game) if game else (token,)).fetchone() is not None
 
     def _english_names(self, ids: list[str]) -> list[str]:
         """Englische Katalognamen zu übersetzt gefundenen Karten („Glurak“ → „Charizard“) – so werden auch Drucke

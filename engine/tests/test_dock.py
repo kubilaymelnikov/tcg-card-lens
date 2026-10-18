@@ -320,3 +320,11 @@ def test_pack_session_can_be_deleted_completely():
     s.pack_delete()
     assert "Kamera" not in s.shared.pack_sessions and "Andere" in s.shared.pack_sessions
     assert s.hit_until == {} and s.banner is None
+
+
+def test_set_code_is_split_from_search():
+    from dock_server import _split_set_code
+
+    assert _split_set_code("LOB-DE020") == ("", "LOB", "020")  # Sprachkennung egal
+    assert _split_set_code("Black Luster Ritual DPBC-EN007") == ("Black Luster Ritual", "DPBC", "007")
+    assert _split_set_code("Sol Ring 409") == ("Sol Ring 409", None, None)
