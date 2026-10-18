@@ -241,8 +241,8 @@ class DockApi:
         h, w = img.shape[:2]
         tracks = []
         for t in list(sess.pipeline.tracker.tracks):
-            if t.hidden or (t.state == "rejected" and t.user_rejected):
-                continue
+            if t.hidden or (t.state == "rejected" and (t.user_rejected or t.score < LIKELY_CARD_SCORE)):
+                continue  # dieselbe Regel wie für die Kacheln: kein Umriss ohne Kachel
             q = (t.display / np.float32([w, h])).round(4).tolist()
             tracks.append({"label": sess.label_for(t.id), "track": t.id, "state": t.state,
                            "certain": bool(t.confirmed or (t.identity is not None and t.identity.certain)),
