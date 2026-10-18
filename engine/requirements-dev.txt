@@ -1,0 +1,10 @@
+# Entwicklung: PyTorch-Backend, Detektor-Training, ONNX-Export (tools/export_onnx.py), Tests.
+# PyTorch vorher passend installieren, z. B. mit CUDA 13.0 (setup-engine.ps1 -Dev erledigt beides):
+#   pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cu130
+# Dazu ein onnxruntime-Paket wie in requirements.txt beschrieben (für den Export-Abgleich).
+-r requirements.txt
+ultralytics==8.4.178
+transformers==5.20.1
+huggingface_hub==2.2.0
+onnx==1.23.2
+pytest

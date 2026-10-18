@@ -1,12 +1,18 @@
 ﻿# Richtet die TCG-Card-Lens-Engine ein (wird vom Installer aufgerufen, kann auch erneut ausgeführt werden).
 #   1. Python 3.12 finden oder für den aktuellen Benutzer installieren
-#   2. Virtuelle Umgebung + Pakete (PyTorch mit CUDA, wenn eine NVIDIA-GPU vorhanden ist)
-#   3. Modelle laden
+#   2. Virtuelle Umgebung + Pakete: schlank ohne PyTorch (ONNX Runtime passend zur GPU, ~0,4–2 GB statt ~4 GB)
+#        NVIDIA -> onnxruntime-gpu (CUDA + cuDNN als Pip-Pakete), AMD/Intel -> onnxruntime-directml, sonst CPU
+#      -Dev: zusätzlich PyTorch, Ultralytics, Transformers (Training, ONNX-Export, PyTorch-Backend)
+#   3. Modelle laden (ONNX-Modelle vom GitHub-Release, mit SHA256-Prüfung)
 #   4. Auswahl speichern (data\config.json: Spiele, Namenssprachen, Paket-Adresse)
 #   5. Kartendaten: je Spiel ein fertiges Datenpaket (Katalog + Erkennungs-Index) installieren;
 #      ohne Paket (offline, noch nicht veröffentlicht) lokal aufbauen (Bilder laden + einbetten)
 #
 #   setup-engine.ps1 -Games pokemon,mtg -Languages de,en [-PackDir D:\packs] [-PackUrl https://…] [-SkipData] [-UiLang de|en]
+#                    [-Runtime auto|cuda|directml|cpu] [-Dev]
+#   -Runtime directml geht auch mit NVIDIA-GPUs (kleinste Installation, ~0,4 GB); auto wählt nach der GPU.
+#   Ohne -Dev werden PyTorch-Pakete einer älteren Installation entfernt (spart ~3 GB) – im Entwicklungs-Checkout
+#   daher immer mit -Dev aufrufen.
 #   Ohne -Games/-Languages bleibt die bisherige Auswahl (bzw. Standard: Pokémon + Magic, Deutsch + Englisch).
 param(
     [switch]$SkipData,
@@ -14,7 +20,10 @@ param(
     [string[]]$Languages = @(), # Sprachcodes, z. B. de,en
     [string]$PackUrl = "",    # Basis-URL der Datenpakete (leer = Standard/bisherige Einstellung)
     [string]$PackDir = "",    # lokaler Ordner mit Datenpaketen (Offline-Installation)
-    [string]$UiLang = ""      # Sprache der Meldungen: de | en (leer = Windows-Sprache; der Installer übergibt seine)
+    [string]$UiLang = "",     # Sprache der Meldungen: de | en (leer = Windows-Sprache; der Installer übergibt seine)
+    [ValidateSet("auto", "cuda", "directml", "cpu")]
+    [string]$Runtime = "auto", # ONNX-Runtime-Variante (auto = nach GPU)
+    [switch]$Dev               # Entwicklung: PyTorch-Backend, Training, ONNX-Export
 )
 $ErrorActionPreference = "Stop"
 $here = $PSScriptRoot
@@ -49,20 +58,61 @@ $venvPy = Join-Path $here ".venv\Scripts\python.exe"
 if (-not (Test-Path $venvPy)) { & $py -m venv (Join-Path $here ".venv") }
 & $venvPy -m pip install --upgrade pip --quiet
 
-Step (L "PyTorch installieren" "Installing PyTorch")
+Step (L "Grafikkarte erkennen" "Detecting graphics card")
 # GPU über die Windows-Geräteliste erkennen (nvidia-smi-Ausgabe auf stderr bricht unter "Stop" ab)
-$gpu = [bool](Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "NVIDIA" })
-if ($gpu) {
-    Write-Host (L "NVIDIA-GPU gefunden – PyTorch mit CUDA 13.0 (ca. 2 GB Download)" "NVIDIA GPU found – PyTorch with CUDA 13.0 (about 2 GB download)")
-    & $venvPy -m pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cu130
-} else {
-    Write-Host (L "Keine NVIDIA-GPU gefunden – PyTorch für CPU (deutlich langsamer)" "No NVIDIA GPU found – PyTorch for CPU (much slower)")
-    & $venvPy -m pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cpu
+$gpuNames = @(Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+$nvidia = [bool]($gpuNames | Where-Object { $_ -match "NVIDIA" })
+$dxGpu = [bool]($gpuNames | Where-Object { $_ -match "AMD|Radeon|Intel.*(Arc|Iris|UHD|HD Graphics)|Qualcomm|Adreno" })
+if ($gpuNames) { Write-Host ((L "Gefunden: " "Found: ") + ($gpuNames -join ", ")) }
+if ($Runtime -eq "auto") {
+    if ($nvidia) { $Runtime = "cuda" } elseif ($dxGpu) { $Runtime = "directml" } else { $Runtime = "cpu" }
 }
-if ($LASTEXITCODE -ne 0) { throw (L "PyTorch-Installation fehlgeschlagen" "PyTorch installation failed") }
+# Genau ein onnxruntime-Paket: alle liefern das Modul "onnxruntime" und würden sich gegenseitig überschreiben
+$ortPackages = @{
+    "cuda"     = @("onnxruntime-gpu[cuda,cudnn]==1.31.0", "onnxruntime-gpu")
+    "directml" = @("onnxruntime-directml==1.24.4", "onnxruntime-directml")
+    "cpu"      = @("onnxruntime==1.31.0", "onnxruntime")
+}
+$ortSpec = $ortPackages[$Runtime][0]
+switch ($Runtime) {
+    "cuda"     { Write-Host (L "ONNX Runtime mit CUDA (NVIDIA, inkl. CUDA-/cuDNN-Laufzeit, ca. 1 GB Download)" "ONNX Runtime with CUDA (NVIDIA, incl. CUDA/cuDNN runtime, about 1 GB download)") }
+    "directml" { Write-Host (L "ONNX Runtime mit DirectML (AMD/Intel/NVIDIA über DirectX 12, ca. 30 MB Download)" "ONNX Runtime with DirectML (AMD/Intel/NVIDIA via DirectX 12, about 30 MB download)") }
+    "cpu"      { Write-Host (L "Keine unterstützte GPU gefunden – ONNX Runtime für CPU (langsamer)" "No supported GPU found – ONNX Runtime for CPU (slower)") }
+}
+# Unter "Stop" würde eine stderr-Zeile von pip (z. B. Hinweise) in PowerShell 5.1 abbrechen
+$installed = @()
+try {
+    $ErrorActionPreference = "Continue"
+    $installed = @(& $venvPy -m pip list --format=freeze 2>$null | ForEach-Object { ($_ -split "==")[0].ToLower().Replace("_", "-") })
+} finally { $ErrorActionPreference = "Stop" }
+$otherOrt = @($ortPackages.Keys | Where-Object { $_ -ne $Runtime } | ForEach-Object { $ortPackages[$_][1] } | Where-Object { $installed -contains $_ })
+if ($otherOrt) {
+    Write-Host ((L "Entferne andere ONNX-Runtime-Variante: " "Removing other ONNX Runtime variant: ") + ($otherOrt -join ", "))
+    & $venvPy -m pip uninstall -y @otherOrt
+}
+
+if ($Dev) {
+    Step (L "PyTorch installieren (Entwicklung)" "Installing PyTorch (development)")
+    if ($nvidia) {
+        Write-Host (L "NVIDIA-GPU gefunden – PyTorch mit CUDA 13.0 (ca. 2 GB Download)" "NVIDIA GPU found – PyTorch with CUDA 13.0 (about 2 GB download)")
+        & $venvPy -m pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cu130
+    } else {
+        Write-Host (L "Keine NVIDIA-GPU gefunden – PyTorch für CPU" "No NVIDIA GPU found – PyTorch for CPU")
+        & $venvPy -m pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cpu
+    }
+    if ($LASTEXITCODE -ne 0) { throw (L "PyTorch-Installation fehlgeschlagen" "PyTorch installation failed") }
+    $reqFile = "requirements-dev.txt"
+} else {
+    $reqFile = "requirements.txt"
+    $torchPkgs = @("torch", "torchvision", "ultralytics", "ultralytics-thop", "transformers", "huggingface-hub", "onnx") | Where-Object { $installed -contains $_ }
+    if ($installed -contains "torch") {
+        Write-Host (L "Ältere Installation mit PyTorch gefunden – wird entfernt (die Engine braucht es nicht mehr, spart ca. 3 GB)" "Older installation with PyTorch found – removing it (the engine no longer needs it, saves about 3 GB)")
+        & $venvPy -m pip uninstall -y @torchPkgs
+    }
+}
 
 Step (L "Weitere Pakete" "Further packages")
-& $venvPy -m pip install -r (Join-Path $here "requirements.txt")
+& $venvPy -m pip install -r (Join-Path $here $reqFile) $ortSpec
 if ($LASTEXITCODE -ne 0) { throw (L "Paketinstallation fehlgeschlagen" "Package installation failed") }
 
 Step (L "Modelle laden" "Downloading models")
