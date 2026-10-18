@@ -1,6 +1,6 @@
 ﻿; Installer für TCG Card Lens (OBS-Plugin + KI-Engine). Bauen: installer\build-installer.ps1
 #define AppName "TCG Card Lens"
-#define AppVersion "0.3.0"
+#define AppVersion "0.3.1"
 #define Root ".."
 ; Auswahlseite: Spiele und Namenssprachen als "kürzel=Anzeigename;…" (neue Spiele hier ergänzen,
 ; Kürzel wie in engine/cardengine/config.py GAMES). Vorauswahl: alle Spiele, Sprachen laut LangDefault.

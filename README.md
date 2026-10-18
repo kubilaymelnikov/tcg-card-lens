@@ -2,6 +2,8 @@
 
 **Deutsch** · [English](README.en.md)
 
+![TCG Card Lens in OBS: sieben Karten im Toploader erkannt, mit Name, Preis und Trend; rechts das Karten-Dock](docs/images/teaser.jpg)
+
 **OBS-Plugin, das Sammelkarten im Kamerabild erkennt und ihren Cardmarket-Preis einblendet** – für
 **Pokémon**, **Magic: The Gathering** und **Yu-Gi-Oh!**. Läuft lokal auf deiner Grafikkarte (NVIDIA, AMD oder Intel per DirectML), ohne Cloud-Dienst.
 
