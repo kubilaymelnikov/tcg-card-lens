@@ -13,6 +13,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .detection.base import Detection, Detector
+from .i18n import Msg
 from .tracking import CardTracker, Track, TrackerConfig
 
 
@@ -456,7 +457,7 @@ class CardPipeline:
 
         self.post(run)
         if not done.wait(timeout):
-            return {"found": False, "error": "Zeitüberschreitung – läuft das Kamerabild?"}
+            return {"found": False, "error": Msg("probe.timeout")}
         return result
 
     def _reset_for_probe(self, t: Track) -> None:

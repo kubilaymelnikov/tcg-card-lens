@@ -195,7 +195,7 @@ def test_dock_pack_state_reset_export_remove(tmp_path, monkeypatch):
     data, name = api.pack_csv("s1")
     assert data.startswith("﻿".encode()) and name.endswith(".csv")
 
-    monkeypatch.setattr(po, "save_csv", lambda ps, source, root=None: save_csv(ps, source, root=str(tmp_path)))
+    monkeypatch.setattr(po, "save_csv", lambda ps, source, root=None, **kw: save_csv(ps, source, root=str(tmp_path), **kw))
     r = api.pack_export("s1")
     assert r["ok"] and r["path"].startswith(str(tmp_path))
 

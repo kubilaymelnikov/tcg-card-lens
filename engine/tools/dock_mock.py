@@ -3,7 +3,7 @@
 Simuliert die HTTP-API aus docs/DOCK.md mit Fake-Daten, damit die Oberfläche ohne Engine/OBS
 entwickelt werden kann. Nur Python-Standardbibliothek.
 
-    python tools/dock_mock.py [--port 47839] [--host 127.0.0.1] [--flaky]
+    python tools/dock_mock.py [--port 47839] [--host 127.0.0.1] [--flaky] [--lang de|en|en-US …]
 
 Kamerabild-Vorschau: Jede Sitzung liefert "frame"/"tracks" (1920×1080-Raster mit Kartenplätzen), /api/frame/<sid>
 ein generiertes SVG-Kamerabild mit grauen Karten. Auf einigen Plätzen liegt eine Karte ohne Track („übersehen“):
@@ -15,6 +15,12 @@ found=false, ein aufgezogener Rahmen findet immer eine Karte (how "rahmen"). --n
 state (uncertain/failed/rejected), melden kurz needs_confirmation=false oder recheck=true, bekommen gelegentlich
 einen anderen Vorschlag; Karte D hält die Frage mit "sticky": true offen; /api/state liefert gelegentlich 500
 oder antwortet erst nach 4 s.
+
+--lang simuliert die OBS-Sprache (ui_language der Sitzungen, Standard de): Gründe, Status und Fehlermeldungen kommen
+in dieser Sprache, das Dock folgt ihr. ?lang=de|en an der Dock-URL überschreibt sie wie bei der echten Engine.
+
+Pack-Opening: Quelle „Kamera Tisch“ hat eine laufende Session (Abschnitt „Session“, Schalter im Kopf, CSV);
+/session zeigt die Session-Anzeige (engine/dock/session.html). Bestätigte Karten landen in der Session.
 
 Dann im Browser (oder als OBS-Browser-Dock) http://127.0.0.1:47839/ öffnen.
 """
@@ -32,9 +38,16 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import sys
 from xml.sax.saxutils import escape
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from cardengine import i18n  # noqa: E402  (nur Standardbibliothek)
+from cardengine.i18n import Msg  # noqa: E402
+
 DOCK_HTML = Path(__file__).resolve().parent.parent / "dock" / "dock.html"
+SESSION_HTML = Path(__file__).resolve().parent.parent / "dock" / "session.html"
+UI_LOCALE = "de-DE"  # --lang: simulierte OBS-Sprache
 
 # Katalog für /api/search und zum Auflösen von Schlüsseln bei /api/confirm.
 CATALOG = [
@@ -146,13 +159,13 @@ def initial_state() -> dict:
     s1 = {
         "id": "s1", "source": "Kamera Tisch", "highlight": None, "_hl_until": 0.0,
         "cards": [
-            card("A", 11, "pokemon|sv3pt5-25", game="pokemon", sim=0.81, needs=True, reason="geringe Ähnlichkeit",
+            card("A", 11, "pokemon|sv3pt5-25", game="pokemon", sim=0.81, needs=True, reason=Msg("reason.low_similarity"),
                  candidates=[cand("pokemon|sv3pt5-173", 0.79), cand("pokemon|sv4pt5-131", 0.74),
                              cand("pokemon|swsh45-SV013", 0.70)], state="uncertain"),
             card("B", 12, "pokemon|sv3pt5-6", game="pokemon", sim=0.96),
             card("C", 13, "mtg|lea-161", game="mtg", sim=0.97, confirmed=True, method="bestätigt"),
             card("D", 14, None, game="mtg", name="Sol Ring", sim=0.88, needs=True,
-                 reason="Druck unklar (mehrere Ausgaben gleich ähnlich)", state="uncertain",
+                 reason=Msg("reason.footer_unreadable"), state="uncertain",
                  candidates=[cand("mtg|c21-263", 0.88), cand("mtg|cmr-472", 0.87), cand("mtg|ltc-284", 0.86)]),
             card("E", 15, "mtg|dmu-107", game="mtg", sim=0.93, method="embedding+ocr"),
         ],
@@ -167,9 +180,56 @@ def initial_state() -> dict:
     }
     place_cards(s1, [0, 1, 2, 5, 7], [3, 6, 8])   # Plätze 3, 6, 8: übersehene Karten
     place_cards(s2, [1, 2, 3], [6])
-    return {"engine": "0.2.0-mock", "status": "bereit",
+    s1["settings"] = {"auto_detect": True, "pack_enabled": True, "pack_threshold": 10.0}
+    s2["settings"] = {"auto_detect": True, "pack_enabled": False, "pack_threshold": 10.0}
+    now = time.time()
+    s1["_pack"] = {"started": now - 600, "cards": []}
+    for i, (key, price) in enumerate((("pokemon|sv3pt5-1", 0.35), ("mtg|dmu-107", 24.90), ("pokemon|sv3pt5-151", 3.10),
+                                      ("pokemon|sv3pt5-199", 168.73))):
+        pack_add(s1, 900 + i, key, price, now - 500 + i * 90)
+    return {"engine": "0.2.0-mock", "status": Msg("status.ready"),
             "learned": {"references": 12, "negatives": 3, "dataset": 15},
             "sessions": [s1, s2]}
+
+
+_PACK_IDS = iter(range(1, 10 ** 9))
+
+
+def pack_add(s: dict, track: int, key: str, price: float | None, when: float | None = None) -> None:
+    """Sicher erkannte Karte in die Pack-Opening-Session der Quelle übernehmen (Hit ab Schwelle)."""
+    p = s.get("_pack")
+    if p is None or not s["settings"]["pack_enabled"]:
+        return
+    info = BY_KEY[key]
+    p["cards"].append({"id": next(_PACK_IDS), "track": track, "key": key, "game": key.split("|", 1)[0],
+                       "name": info["name"], "set_name": info["set_name"], "number": info["number"],
+                       "time": when or time.time(), "price": price, "currency": "EUR", "variant": "normal",
+                       "hit": price is not None and price >= s["settings"]["pack_threshold"]})
+
+
+def pack_state(s: dict) -> dict | None:
+    p = s.get("_pack")
+    if p is None and not s["settings"]["pack_enabled"]:
+        return None
+    cards = list(reversed(p["cards"])) if p else []
+    out = [dict(c, image=img_url(c["key"])) for c in cards]
+    return {"started": p["started"] if p else None, "threshold": s["settings"]["pack_threshold"],
+            "total": round(sum(c["price"] or 0 for c in cards), 2), "count": len(cards),
+            "hits": sum(1 for c in cards if c["hit"]), "cards": out, "enabled": s["settings"]["pack_enabled"],
+            "csv": f"/api/pack/csv/{s['id']}"}
+
+
+def pack_csv(s: dict, lang: str) -> str:
+    de = lang == "de"
+    sep = ";" if de else ","
+    rows = [i18n.t("csv.columns", lang).replace("|", sep)]
+    for c in (s.get("_pack") or {"cards": []})["cards"]:
+        price = "" if c["price"] is None else f"{c['price']:.2f}"
+        rows.append(sep.join([time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(c["time"])), c["game"],
+                              c["name"], c["set_name"], c["number"], c["variant"],
+                              price.replace(".", ",") if de else price, "EUR",
+                              i18n.t("csv.yes", lang) if c["hit"] else "", c["key"]]))
+    return "\r\n".join(rows) + "\r\n"
 
 
 LOCK = threading.Lock()
@@ -234,11 +294,18 @@ def find(session_id, track):
     return None, None
 
 
-def public_state() -> dict:
+def public_state(lang: str | None = None) -> dict:
+    """Zustand wie /api/state der Engine; `lang` ("de"/"en", aus ?lang=) überschreibt die Sprache der Texte."""
     now = time.time()
     tick = int((now - START) / 2)  # Kamera-Ausschnitt ändert sich alle 2 s
     out = copy.deepcopy(STATE)
+    ui = i18n.lang_of(UI_LOCALE)
+    lang = lang or ui
+    out["status"] = i18n.t(out["status"], lang)
+    out["ui_language"] = ui
     for s, orig in zip(out["sessions"], STATE["sessions"]):
+        s["ui_language"], s["ui_locale"] = ui, UI_LOCALE
+        s["pack"] = pack_state(orig)
         if orig["_hl_until"] < now:
             orig["highlight"] = None
             s["highlight"] = None
@@ -249,6 +316,8 @@ def public_state() -> dict:
                 finish_identify(oc)
                 c.update(copy.deepcopy(oc))
             c["crop"] = f"/api/crop/{s['id']}/{c['track']}?v={c['_v'] + tick}"
+            if c.get("reason"):
+                c["reason"] = i18n.t(c["reason"], lang)
         quads = {c["track"]: c.get("_quad") for c in s["cards"]}
         for c in s["cards"]:
             for k in [k for k in c if k.startswith("_")]:
@@ -290,7 +359,7 @@ def finish_identify(c: dict) -> None:
     c.update(key=key, name=info["name"], set_name=info["set_name"], set_code=info["set_code"],
              number=info["number"], image=img_url(key), game=key.split("|", 1)[0], similarity=sim,
              state="uncertain" if needs else "identified", needs_confirmation=needs,
-             reason="geringe Ähnlichkeit" if needs else None,
+             reason=Msg("reason.low_similarity") if needs else None,
              price=None if needs else fake_price(key), _ident_at=None)
 
 
@@ -312,7 +381,7 @@ def probe(s: dict, body: dict) -> dict:
         if i not in used and point_in_quad(x, y, slot_quad(i)):
             c = new_track(s, slot_quad(i), i)
             return {"ok": True, "found": True, "label": c["label"], "track": c["track"], "how": "detektor"}
-    return {"ok": True, "found": False, "error": "Keine Karte gefunden – Rahmen um die Karte ziehen"}
+    return {"ok": True, "found": False, "error": Msg("dock.no_card_found")}
 
 
 def svg_frame(s: dict, width: int) -> bytes:
@@ -369,16 +438,43 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def json(self, obj, code: int = 200):
+        if isinstance(obj, dict) and isinstance(obj.get("error"), str):  # Fehlertexte in der Sprache der Anfrage
+            obj = dict(obj, error=i18n.t(obj["error"], getattr(self, "_lang", None) or i18n.lang_of(UI_LOCALE)))
         self.send(code, json.dumps(obj, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+
+    def req_lang(self, query: str) -> str | None:
+        v = (urllib.parse.parse_qs(query).get("lang", [""])[0] or "").lower()
+        self._lang = v if v in i18n.LANGS else None
+        return self._lang
 
     def do_GET(self):
         u = urllib.parse.urlsplit(self.path)
         path = u.path
+        lang = self.req_lang(u.query)
         if path in ("/", "/index.html", "/dock.html"):
             try:
                 self.send(200, DOCK_HTML.read_bytes(), "text/html; charset=utf-8")
             except OSError:
                 self.send(404, b"dock.html fehlt", "text/plain; charset=utf-8")
+            return
+        if path in ("/session", "/session.html"):
+            try:
+                self.send(200, SESSION_HTML.read_bytes(), "text/html; charset=utf-8")
+            except OSError:
+                self.send(404, b"session.html fehlt", "text/plain; charset=utf-8")
+            return
+        if path.startswith("/api/pack/csv/"):
+            with LOCK:
+                s, _ = find(path.rsplit("/", 1)[-1], None)
+                if not s:
+                    return self.send(404, b"", "text/plain")
+                body = ("\ufeff" + pack_csv(s, lang or i18n.lang_of(UI_LOCALE))).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/csv; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Content-Disposition", 'attachment; filename="session-mock.csv"')
+            self.end_headers()
+            self.wfile.write(body)
             return
         if path == "/api/state":
             if FLAKY:
@@ -388,7 +484,7 @@ class Handler(BaseHTTPRequestHandler):
                 if r < 0.11:
                     time.sleep(4.0)
             with LOCK:
-                self.json(public_state())
+                self.json(public_state(lang))
             return
         if path == "/api/search":
             q = urllib.parse.parse_qs(u.query)
@@ -433,7 +529,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send(404, b"nicht gefunden", "text/plain; charset=utf-8")
 
     def do_POST(self):
-        path = urllib.parse.urlsplit(self.path).path
+        u = urllib.parse.urlsplit(self.path)
+        path = u.path
+        self.req_lang(u.query)
         try:
             n = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(n) or b"{}")
@@ -445,7 +543,7 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 s, _ = find(body.get("session"), None)
                 if not s or NO_FRAME:
-                    return self.json({"ok": False, "error": "Kein Kamerabild"}, 404)
+                    return self.json({"ok": False, "error": Msg("dock.no_frame")}, 404)
                 return self.json(probe(s, body))
         with LOCK:
             if path == "/api/highlight":
@@ -458,16 +556,46 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/forget":
                 STATE["learned"]["references"] = max(0, STATE["learned"]["references"] - 1)
                 return self.json({"ok": True})
+            if path == "/api/settings":
+                s, _ = find(body.get("session"), None)
+                if not s:
+                    return self.json({"ok": False, "error": Msg("dock.source_not_connected")})
+                types = {"auto_detect": bool, "pack_enabled": bool, "pack_threshold": float}
+                changed = {k: types[k](v) for k, v in body.items() if k in types}
+                if not changed:
+                    return self.json({"ok": False, "error": Msg("dock.no_setting")})
+                s["settings"].update(changed)
+                if s["settings"]["pack_enabled"] and s.get("_pack") is None:
+                    s["_pack"] = {"started": time.time(), "cards": []}
+                return self.json({"ok": True, "changed": changed})
+            if path.startswith("/api/pack/"):
+                s, _ = find(body.get("session"), None)
+                if not s:
+                    return self.json({"ok": False, "error": Msg("dock.source_not_connected")})
+                p = s.get("_pack") or {"started": time.time(), "cards": []}
+                if path == "/api/pack/reset":
+                    saved = "data/sessions/mock/alt.csv" if p["cards"] else None
+                    s["_pack"] = {"started": time.time(), "cards": []}
+                    return self.json({"ok": True, "saved": saved})
+                if path == "/api/pack/export":
+                    if not p["cards"]:
+                        return self.json({"ok": False, "error": Msg("dock.session_empty")})
+                    return self.json({"ok": True, "path": "data/sessions/mock/export.csv"})
+                if path == "/api/pack/remove":
+                    before = len(p["cards"])
+                    p["cards"] = [c for c in p["cards"] if c["id"] != body.get("entry")]
+                    return self.json({"ok": True} if len(p["cards"]) < before
+                                     else {"ok": False, "error": Msg("dock.entry_not_found")})
             s, c = find(body.get("session"), body.get("track"))
             if not c:
-                return self.json({"ok": False, "error": "Karte nicht (mehr) vorhanden"}, 404)
+                return self.json({"ok": False, "error": Msg("dock.card_gone")}, 404)
             if FLAKY and path in ("/api/confirm", "/api/reject") and HIDDEN.get((s["id"], c["track"]), 0) > 0:
-                return self.json({"ok": False, "error": "Karte nicht mehr im Bild"}, 409)
+                return self.json({"ok": False, "error": Msg("dock.card_gone")}, 409)
             if path == "/api/confirm":
                 key = body.get("key")
                 info = BY_KEY.get(key)
                 if not info:
-                    return self.json({"ok": False, "error": "unbekannter Kartenschlüssel"}, 400)
+                    return self.json({"ok": False, "error": Msg("dock.card_not_in_catalog")}, 400)
                 if "fail" in (c.get("name") or "").lower():
                     return self.json({"ok": False, "error": "Simulierter Fehler"}, 500)
                 old_key = c["key"]
@@ -481,6 +609,7 @@ class Handler(BaseHTTPRequestHandler):
                     c["candidates"].insert(0, cand(old_key, c["similarity"]))
                 STATE["learned"]["references"] += 1
                 STATE["learned"]["dataset"] += 1
+                pack_add(s, c["track"], key, c["price"]["value"])
                 return self.json({"ok": True})
             if path == "/api/reject":
                 s["cards"].remove(c)
@@ -503,7 +632,7 @@ class Handler(BaseHTTPRequestHandler):
                     p = fake_price(c["key"] + str(random.random()))
                     c["price"] = p if not c["needs_confirmation"] else None
                 return self.json({"ok": True})
-        self.json({"ok": False, "error": "unbekannter Pfad"}, 404)
+        self.json({"ok": False, "error": Msg("dock.unknown_action")}, 404)
 
 
 def main():
@@ -513,12 +642,16 @@ def main():
     ap.add_argument("--flaky", action="store_true",
                     help="unruhige Engine simulieren (fehlende Karten, State-Wechsel, 500er, Verzögerungen)")
     ap.add_argument("--no-frame", action="store_true", help="kein Kamerabild (frame/tracks fehlen, alte Engine)")
+    ap.add_argument("--lang", default="de-DE",
+                    help="simulierte OBS-Sprache (ui_language), z. B. de, en, de-DE, en-US (Standard de-DE)")
     a = ap.parse_args()
-    global FLAKY, NO_FRAME
+    global FLAKY, NO_FRAME, UI_LOCALE
     FLAKY = a.flaky
     NO_FRAME = a.no_frame
+    UI_LOCALE = a.lang
     srv = ThreadingHTTPServer((a.host, a.port), Handler)
-    print(f"Dock-Mock läuft: http://{a.host}:{a.port}/{'  [flaky]' if FLAKY else ''}  (Strg+C beendet)", flush=True)
+    print(f"Dock-Mock läuft: http://{a.host}:{a.port}/{'  [flaky]' if FLAKY else ''}  "
+          f"[ui_language {UI_LOCALE}]  (Strg+C beendet)", flush=True)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

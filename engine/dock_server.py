@@ -20,6 +20,8 @@ import numpy as np
 from cardengine import __version__
 from cardengine.card_database.catalog import image_path
 from cardengine.geometry import rectify
+from cardengine import i18n
+from cardengine.i18n import Msg
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DOCK_HTML = os.path.join(HERE, "dock", "dock.html")
@@ -49,6 +51,19 @@ def card_key(game: str, card_id: str) -> str:
     return f"{game}|{card_id}"
 
 
+def _req_lang(value) -> str | None:
+    """Sprache aus der Anfrage (?lang=de|en bzw. "lang" im Body) – nur "de"/"en", sonst keine Vorgabe."""
+    v = (value or "").strip().lower() if isinstance(value, str) else ""
+    return v if v in i18n.LANGS else None
+
+
+def _err_text(err: Exception, lang: str | None) -> str:
+    """Fehlermeldung einer Ausnahme übersetzen (Msg als einziges Argument), sonst wie bisher str(err)."""
+    if len(err.args) == 1 and isinstance(err.args[0], str):
+        return i18n.t(err.args[0], lang)
+    return str(err)
+
+
 class DockApi:
     """Zustand und Aktionen für das Dock; `shared` ist server.Shared."""
 
@@ -73,6 +88,29 @@ class DockApi:
 
     def _session(self, sid: str):
         return next((s for s in list(self.shared.session_list) if s.sid == sid), None)
+
+    @staticmethod
+    def _sess_lang(sess) -> str:
+        """Sprache einer Sitzung ("de"/"en"); Sitzungen ohne Angabe (alte Plugins) bleiben deutsch."""
+        lang = getattr(sess, "lang", None)
+        if lang in i18n.LANGS:
+            return lang
+        settings = getattr(sess, "settings", None) or {}
+        return i18n.lang_of(settings.get("ui_language"))
+
+    def ui_language(self) -> str | None:
+        """Sprache der Oberfläche insgesamt = Sprache der ersten verbundenen Sitzung (None ohne Sitzung)."""
+        sessions = list(self.shared.session_list)
+        return self._sess_lang(sessions[0]) if sessions else None
+
+    def lang_for(self, sid: str | None = None, override: str | None = None) -> str:
+        """Ausgabesprache: Vorgabe der Anfrage > Sitzung > erste Sitzung > Deutsch."""
+        if override in i18n.LANGS:
+            return override
+        sess = self._session(sid) if sid else None
+        if sess is not None:
+            return self._sess_lang(sess)
+        return self.ui_language() or i18n.DEFAULT_LANG
 
     @staticmethod
     def _track(sess, track_id):
@@ -101,18 +139,24 @@ class DockApi:
                 "similarity": None if sim is None else round(float(sim), 3), "image": self._image_url(key)}
 
     # ---------------------------------------------------------------- Zustand
-    def state(self, overlay: bool = False) -> dict:
+    def state(self, overlay: bool = False, lang: str | None = None) -> dict:
+        """Zustand fürs Dock. `lang` ("de"/"en") überschreibt die Sprache der Texte (Gründe, Status) – sonst gilt
+        je Sitzung deren `ui_language`."""
         if not overlay:  # Overlay-Seiten (Session-Anzeige) zählen nicht als „Dock offen“
             self.shared.dock_seen = time.time()
         learned = self.shared.learned.counts() if self.shared.learned is not None else {}
         sessions = []
         for sess in list(self.shared.session_list):
+            s_lang = self._sess_lang(sess)
+            settings = getattr(sess, "settings", None) or {}
+            base = {"id": sess.sid, "source": sess.source, "ui_language": s_lang,
+                    "ui_locale": settings.get("ui_language")}
             if sess.pipeline is None:
-                sessions.append({"id": sess.sid, "source": sess.source, "highlight": None, "cards": []})
+                sessions.append({**base, "highlight": None, "cards": []})
                 continue
-            cards = self._sticky_cards(sess)
+            cards = self._sticky_cards(sess, lang or s_lang)
             cards.sort(key=lambda c: (len(c["label"]), c["label"]))
-            entry = {"id": sess.sid, "source": sess.source, "highlight": sess.current_highlight(), "cards": cards}
+            entry = {**base, "highlight": sess.current_highlight(), "cards": cards}
             entry.update(self._preview(sess))
             entry["settings"] = {"auto_detect": bool(sess.settings.get("auto_detect", True)),
                                  "pack_enabled": bool(sess.settings.get("pack_enabled", False)),
@@ -123,14 +167,15 @@ class DockApi:
             rev = str(int(os.path.getmtime(DOCK_HTML)))
         except OSError:
             rev = None
-        return {"engine": __version__, "status": self.shared.status, "learned": learned, "sessions": sessions,
-                "dock_rev": rev, "instance": INSTANCE}
+        ui = self.ui_language()
+        return {"engine": __version__, "status": i18n.t(self.shared.status, lang or ui or i18n.DEFAULT_LANG),
+                "learned": learned, "sessions": sessions, "ui_language": ui, "dock_rev": rev, "instance": INSTANCE}
 
     # ---------------------------------------------------------------- Pack-Opening (Session-Liste)
     def _pack(self, sid: str):
         sess = self._session(sid)
         if sess is None:
-            raise KeyError("Quelle nicht verbunden")
+            raise KeyError(Msg("dock.source_not_connected"))
         return sess, self.shared.pack_sessions.get(sess.source)
 
     def _pack_state(self, sess) -> dict | None:
@@ -150,7 +195,7 @@ class DockApi:
         data["csv"] = f"/api/pack/csv/{sess.sid}"
         return data
 
-    def pack_reset(self, sid: str) -> dict:
+    def pack_reset(self, sid: str, lang: str | None = None) -> dict:
         """Neue Session; eine nicht leere alte Session wird vorher als CSV gesichert."""
         from cardengine.pack_opening import save_csv
 
@@ -158,33 +203,33 @@ class DockApi:
         saved = None
         with self.shared.pack_lock:
             if ps is not None and ps.cards:
-                saved = save_csv(ps, sess.source)
+                saved = save_csv(ps, sess.source, lang=lang or self._sess_lang(sess))
             sess.pack_reset()
         return {"ok": True, "saved": saved}
 
-    def pack_export(self, sid: str) -> dict:
+    def pack_export(self, sid: str, lang: str | None = None) -> dict:
         from cardengine.pack_opening import save_csv
 
         sess, ps = self._pack(sid)
         if ps is None or not ps.cards:
-            return {"ok": False, "error": "Session ist leer"}
+            return {"ok": False, "error": Msg("dock.session_empty")}
         with self.shared.pack_lock:
-            path = save_csv(ps, sess.source)
+            path = save_csv(ps, sess.source, lang=lang or self._sess_lang(sess))
         return {"ok": True, "path": path}
 
     def pack_remove(self, sid: str, entry_id) -> dict:
         _, ps = self._pack(sid)
         with self.shared.pack_lock:
             ok = ps is not None and ps.remove(int(entry_id))
-        return {"ok": True} if ok else {"ok": False, "error": "Eintrag nicht gefunden"}
+        return {"ok": True} if ok else {"ok": False, "error": Msg("dock.entry_not_found")}
 
-    def pack_csv(self, sid: str) -> tuple[bytes, str] | None:
-        """(CSV-Bytes mit BOM, Dateiname) für den Download."""
+    def pack_csv(self, sid: str, lang: str | None = None) -> tuple[bytes, str] | None:
+        """(CSV-Bytes mit BOM, Dateiname) für den Download; Format nach Sprache (de: Semikolon/Komma)."""
         sess, ps = self._pack(sid)
         if ps is None:
             return None
         with self.shared.pack_lock:
-            text = ps.to_csv()
+            text = ps.to_csv(lang or self._sess_lang(sess))
             name = time.strftime("session-%Y-%m-%d_%H%M%S.csv", time.localtime(ps.started))
         return ("﻿" + text).encode("utf-8"), name
 
@@ -219,7 +264,7 @@ class DockApi:
         """Gezielte Suche an einer Stelle der Vorschau (normierte Koordinaten)."""
         sess = self._session(sid)
         if sess is None or sess.pipeline is None or sess.last_frame_img is None:
-            return {"ok": False, "error": "Kein Kamerabild"}
+            return {"ok": False, "error": Msg("dock.no_frame")}
         h, w = sess.last_frame_img.shape[:2]
         if body.get("rect"):
             x0, y0, x1, y1 = (float(v) for v in body["rect"])
@@ -228,18 +273,18 @@ class DockApi:
             res = sess.pipeline.probe(point=(float(body["x"]) * w, float(body["y"]) * h))
         if not res.get("found"):
             return {"ok": True, "found": False,
-                    "error": res.get("error") or "Keine Karte gefunden – Rahmen um die Karte ziehen"}
+                    "error": res.get("error") or Msg("dock.no_card_found")}
         return {"ok": True, "found": True, "track": res["track"], "label": sess.label_for(res["track"]),
                 "how": res.get("how")}
 
-    def _sticky_cards(self, sess) -> list[dict]:
+    def _sticky_cards(self, sess, lang: str | None = None) -> list[dict]:
         now = time.time()
         out, alive = [], set()
         with self._asked_lock:
             for t in list(sess.pipeline.tracker.tracks):
                 k = (sess.sid, t.id)
                 alive.add(k)
-                c = self._card(sess, t)
+                c = self._card(sess, t, lang)
                 asked = self._asked.get(k)
                 if t.hidden:
                     self._asked.pop(k, None)
@@ -279,7 +324,7 @@ class DockApi:
         with self._asked_lock:
             self._asked.pop((sid, int(track_id)), None)
 
-    def _card(self, sess, t) -> dict | None:
+    def _card(self, sess, t, ui_lang: str | None = None) -> dict | None:
         ident = t.identity
         # Automatisch als „keine Karte“ abgelegt, aber der Detektor ist sich der Kartenform sicher (z. B. Druck ohne
         # Referenzbild, starker Glanz): trotzdem fragen – nur echte Hintergrundstellen bleiben stumm
@@ -287,6 +332,7 @@ class DockApi:
         if ident is None and t.state != "failed" and not likely_card:
             return None  # noch in Erkennung oder verworfen
         lang = sess.settings.get("display_language", "de")
+        ui_lang = ui_lang or self._sess_lang(sess)  # Sprache der Oberfläche (Gründe, „Unbekannte Karte“)
         label = sess.label_for(t.id)
         crop_v = (t.orient_rev * 1_000_000 + sum(t.unlocks.values()) * 1000
                   + (0 if t.finalized else int(time.time() // 2) % 1000))
@@ -296,9 +342,10 @@ class DockApi:
             # Gefragt wird erst, wenn die Karte ruhig liegt (nicht beim Verschieben oder in der Hand)
             "needs_confirmation": not t.confirmed and (ident is None or not ident.certain)
                                   and (t.locked or t.still_frames >= 15),
-            "game": ident.game if ident else t.game, "key": None, "name": "Unbekannte Karte",
+            "game": ident.game if ident else t.game, "key": None, "name": i18n.t("card.unknown", ui_lang),
             "set_name": None, "set_code": None, "number": None, "similarity": None,
-            "method": None, "reason": "nicht erkannt" if ident is None else ident.reason,
+            "method": None,
+            "reason": i18n.t("reason.not_recognized" if ident is None else ident.reason, ui_lang),
             "image": None, "crop": f"/api/crop/{sess.sid}/{t.id}?v={crop_v}",
             "cardmarket_url": None, "price": None, "candidates": [],
         }
@@ -340,7 +387,7 @@ class DockApi:
         frame = sess.last_frame_img
         ident = self.shared.identifier
         if frame is None or ident is None:
-            raise RuntimeError("kein Kamerabild")
+            raise RuntimeError(Msg("dock.no_frame"))
         corners = t.corners.copy()
         if t.identity is not None and getattr(t.identity, "rotate180", None) is not None and (
                 not key or key == card_key(t.identity.game, t.identity.card_id or "")):
@@ -362,9 +409,9 @@ class DockApi:
         t = self._track(sess, track_id)
         rec = self._record(key)
         if t is None:
-            return {"ok": False, "error": "Karte gerade nicht im Bild – kurz warten oder Karte ruhig hinlegen"}
+            return {"ok": False, "error": Msg("dock.card_not_in_view")}
         if rec is None:
-            return {"ok": False, "error": "Karte nicht im Katalog"}
+            return {"ok": False, "error": Msg("dock.card_not_in_catalog")}
         old = t.identity
         emb, rect, rot = self._view(sess, t, key)
         if self.shared.learned is not None:
@@ -422,7 +469,7 @@ class DockApi:
         sess = self._session(sid)
         t = self._track(sess, track_id)
         if t is None:
-            return {"ok": False, "error": "Karte gerade nicht im Bild – kurz warten oder Karte ruhig hinlegen"}
+            return {"ok": False, "error": Msg("dock.card_not_in_view")}
         sess.pipeline.rotate(t.id)
         return {"ok": True}
 
@@ -430,20 +477,20 @@ class DockApi:
         sess = self._session(sid)
         t = self._track(sess, track_id)
         if t is None:
-            return {"ok": False, "error": "Karte nicht mehr im Bild"}
+            return {"ok": False, "error": Msg("dock.card_gone")}
         sess.pipeline.refresh(t.id)
         return {"ok": True}
 
     def highlight(self, sid: str, label: str | None) -> dict:
         sess = self._session(sid)
         if sess is None:
-            return {"ok": False, "error": "Quelle nicht verbunden"}
+            return {"ok": False, "error": Msg("dock.source_not_connected")}
         sess.highlight = (label, time.time() + HIGHLIGHT_S) if label else None
         return {"ok": True}
 
     def forget(self, key: str) -> dict:
         if self.shared.learned is None:
-            return {"ok": False, "error": "Lernspeicher nicht geladen"}
+            return {"ok": False, "error": Msg("dock.learned_not_loaded")}
         return {"ok": True, "removed": self.shared.learned.forget(key)}
 
     def search(self, q: str, game: str | None, limit: int, lang: str = "de") -> dict:
@@ -533,18 +580,22 @@ def _handler(api: DockApi):
             self.end_headers()
             self.wfile.write(body)
 
-        def _json(self, obj, code: int = 200):
+        def _json(self, obj, code: int = 200, lang: str | None = None):
+            if isinstance(obj, dict) and isinstance(obj.get("error"), str):
+                obj = dict(obj, error=i18n.t(obj["error"], lang or getattr(self, "_lang", None) or api.lang_for()))
             self._send(code, json.dumps(obj, ensure_ascii=False, default=str).encode("utf-8"), "application/json; charset=utf-8")
 
         def do_GET(self):
+            lang = None
             try:
                 url = urlparse(self.path)
                 parts = [p for p in url.path.split("/") if p]
+                lang = _req_lang(parse_qs(url.query).get("lang", [None])[0])
                 if url.path in ("/", "/index.html"):
                     with open(DOCK_HTML, "rb") as f:
                         return self._send(200, f.read(), "text/html; charset=utf-8")
                 if url.path == "/api/state":
-                    return self._json(api.state(overlay="overlay" in parse_qs(url.query)))
+                    return self._json(api.state(overlay="overlay" in parse_qs(url.query), lang=lang))
                 if url.path in ("/session", "/session.html"):
                     with open(SESSION_HTML, "rb") as f:
                         return self._send(200, f.read(), "text/html; charset=utf-8")
@@ -557,7 +608,7 @@ def _handler(api: DockApi):
                     data = api.frame_jpeg(parts[2], int(qs.get("w", ["480"])[0]))
                     return self._send(200, data, "image/jpeg") if data else self._send(404, b"", "text/plain")
                 if parts[:3] == ["api", "pack", "csv"] and len(parts) == 4:
-                    res = api.pack_csv(parts[3])
+                    res = api.pack_csv(parts[3], lang)
                     if res is None:
                         return self._send(404, b"", "text/plain")
                     data, name = res
@@ -594,13 +645,18 @@ def _handler(api: DockApi):
                 self._send(404, b"nicht gefunden", "text/plain")
             except Exception as err:
                 traceback.print_exc()
-                self._json({"ok": False, "error": str(err)}, 500)
+                self._json({"ok": False, "error": _err_text(err, lang or api.lang_for())}, 500)
 
         def do_POST(self):
+            self._lang = None
             try:
                 n = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(n) or b"{}") if n else {}
-                path = urlparse(self.path).path
+                url = urlparse(self.path)
+                path = url.path
+                # Sprache der Antwort (Fehlertexte): ?lang= bzw. "lang" im Body, sonst die der Sitzung
+                self._lang = api.lang_for(body.get("session"), _req_lang(parse_qs(url.query).get("lang", [None])[0])
+                                          or _req_lang(body.get("lang")))
                 if path == "/api/confirm":
                     return self._json(api.confirm(body["session"], body["track"], body["key"]))
                 if path == "/api/reject":
@@ -608,10 +664,10 @@ def _handler(api: DockApi):
                 if path == "/api/settings":
                     sess = api._session(body["session"])
                     if sess is None:
-                        return self._json({"ok": False, "error": "Quelle nicht verbunden"})
+                        return self._json({"ok": False, "error": Msg("dock.source_not_connected")})
                     changed = sess.patch_settings({k: v for k, v in body.items() if k != "session"})
                     return self._json({"ok": bool(changed), "changed": changed} if changed
-                                      else {"ok": False, "error": "keine änderbare Einstellung"})
+                                      else {"ok": False, "error": Msg("dock.no_setting")})
                 if path == "/api/probe":
                     return self._json(api.probe(body["session"], body))
                 if path == "/api/rotate":
@@ -625,15 +681,15 @@ def _handler(api: DockApi):
                 if path == "/api/forget":
                     return self._json(api.forget(body["key"]))
                 if path == "/api/pack/reset":
-                    return self._json(api.pack_reset(body["session"]))
+                    return self._json(api.pack_reset(body["session"], self._lang))
                 if path == "/api/pack/export":
-                    return self._json(api.pack_export(body["session"]))
+                    return self._json(api.pack_export(body["session"], self._lang))
                 if path == "/api/pack/remove":
                     return self._json(api.pack_remove(body["session"], body["entry"]))
-                self._json({"ok": False, "error": "unbekannte Aktion"}, 404)
+                self._json({"ok": False, "error": Msg("dock.unknown_action")}, 404)
             except Exception as err:
                 traceback.print_exc()
-                self._json({"ok": False, "error": str(err)}, 500)
+                self._json({"ok": False, "error": _err_text(err, getattr(self, "_lang", None) or api.lang_for())}, 500)
 
     return Handler
 

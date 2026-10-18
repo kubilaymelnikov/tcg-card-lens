@@ -12,6 +12,7 @@ import time
 from datetime import date, timedelta
 
 from ..card_database.catalog import Catalog, CardRecord
+from ..i18n import Msg
 from .base import PriceInfo, PricePoint, PriceProvider
 from .cardmarket import CardmarketPriceGuide
 from .mapping import CardmarketMapping
@@ -67,14 +68,14 @@ class PriceService:
     # ---------- Preise ----------
     def info(self, rec: CardRecord, wait_s: float = 3.0) -> PriceInfo:
         if not self.ensure_loaded():
-            return PriceInfo(id_product=None, note="Preisdaten werden geladen")
+            return PriceInfo(id_product=None, note=Msg("price.loading_data"))
         pid = self.id_product(rec, wait_s=wait_s)
         if not pid:
-            return PriceInfo(id_product=None, note="kein Cardmarket-Produkt gefunden")
+            return PriceInfo(id_product=None, note=Msg("price.no_product"))
         quotes = self.provider.quotes(rec.game, pid)
         info = PriceInfo(id_product=pid, quotes=quotes)
         if not quotes:
-            info.note = "kein Preis auf Cardmarket"
+            info.note = Msg("price.no_price")
             return info
         main_variant = "normal" if "normal" in quotes else next(iter(quotes))
         info.history = self.history(rec.game, pid, main_variant)

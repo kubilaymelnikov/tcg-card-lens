@@ -17,6 +17,8 @@ import itertools
 import time
 from dataclasses import dataclass, field
 
+from .i18n import t as tr, t_lang
+
 DEFAULT_THRESHOLD = 10.0
 CSV_COLUMNS = ["Zeit", "Spiel", "Karte", "Set", "Nummer", "Variante", "Preis", "Währung", "Hit", "Schlüssel"]
 GAME_NAMES = {"pokemon": "Pokémon", "mtg": "Magic", "ygo": "Yu-Gi-Oh!"}
@@ -141,22 +143,26 @@ class PackSession:
                 "count": len(self.cards), "hits": len(self.hits),
                 "cards": [c.to_dict() for c in reversed(self.cards)]}  # neueste zuerst
 
-    def to_csv(self) -> str:
-        """CSV für Excel (deutsch): Semikolon, Dezimalkomma, Zeit lokal. Ohne BOM – den setzt der Aufrufer bei Bedarf."""
+    def to_csv(self, lang: str = "de") -> str:
+        """CSV für Excel, Zeit lokal. Deutsch: Semikolon und Dezimalkomma; Englisch: Komma und Dezimalpunkt.
+        Ohne BOM – den setzt der Aufrufer bei Bedarf."""
+        de = t_lang(lang) == "de"
         buf = io.StringIO()
-        w = csv.writer(buf, delimiter=";", lineterminator="\r\n")
-        w.writerow(CSV_COLUMNS)
+        w = csv.writer(buf, delimiter=";" if de else ",", lineterminator="\r\n")
+        w.writerow(CSV_COLUMNS if de else tr("csv.columns", lang).split("|"))
+        yes = tr("csv.yes", lang)
         for c in self.cards:
+            price = "" if c.price is None else f"{c.price:.2f}"
             w.writerow([
                 time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(c.time)), GAME_NAMES.get(c.game, c.game), c.name,
                 c.set_name or "", c.number or "", c.variant or "",
-                "" if c.price is None else f"{c.price:.2f}".replace(".", ","), c.currency,
-                "ja" if c.hit else "", c.key,
+                price.replace(".", ",") if de else price, c.currency,
+                yes if c.hit else "", c.key,
             ])
         return buf.getvalue()
 
 
-def save_csv(pack: PackSession, source: str, root: str | None = None) -> str:
+def save_csv(pack: PackSession, source: str, root: str | None = None, lang: str = "de") -> str:
     """CSV der Session unter data/sessions/<quelle>/<start>.csv ablegen (UTF-8 mit BOM für Excel); Pfad zurück."""
     import os
     import re
@@ -167,5 +173,5 @@ def save_csv(pack: PackSession, source: str, root: str | None = None) -> str:
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, time.strftime("%Y-%m-%d_%H%M%S", time.localtime(pack.started)) + ".csv")
     with open(path, "w", encoding="utf-8-sig", newline="") as f:
-        f.write(pack.to_csv())
+        f.write(pack.to_csv(lang))
     return path

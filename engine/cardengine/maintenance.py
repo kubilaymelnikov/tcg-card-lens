@@ -25,6 +25,7 @@ import time
 from .card_database.build import build_mtg, build_pokemon, download_images
 from .card_database.catalog import Catalog
 from .config import GAMES, load_config
+from .i18n import Msg
 from .paths import DATA_DIR
 
 DAY = 24 * 3600
@@ -113,7 +114,7 @@ class Maintenance:
         try:
             done = install_packs(missing, name, pack_dir=self.pack_dir, url=self.pack_url, log=log)
         except Exception as err:  # Paket-Probleme dürfen den lokalen Aufbau nie verhindern
-            log(f"Datenpakete fehlgeschlagen: {err}")
+            log(Msg("maint.packs_failed", err=str(err)))
             done = {}
         for game, manifest in done.items():
             # Katalog-Stempel auf den Paketstand: ist das Paket älter als eine Woche, wird sofort nachgeprüft
@@ -133,7 +134,7 @@ class Maintenance:
             return
         cat = Catalog()
         if force or cat.count(game) == 0 or _age(_stamp(game)) > WEEK:
-            self.status = f"{_label(game)}-Katalog wird aktualisiert"
+            self.status = Msg("maint.catalog", game=_label(game))
             builder(cat)
             _touch(game)
 
@@ -157,7 +158,7 @@ class Maintenance:
             if not todo:
                 continue
             chunk = todo[:limit] if limit else todo
-            download_images(chunk, 6, progress=self._progress(f"{_label(game)}-Bilder", offset_left=len(todo)))
+            download_images(chunk, 6, progress=self._progress(Msg("maint.images", game=_label(game)), offset_left=len(todo)))
             loaded = 0
             for r in chunk:
                 if os.path.exists(r.image_path):
@@ -177,7 +178,7 @@ class Maintenance:
 
             emb = []  # erst laden, wenn wirklich etwas einzubetten ist (nach Datenpaketen oft nicht nötig)
             self._own_embedder = lambda: emb[0] if emb else (emb.append(Embedder()) or emb[0])
-        self.status = "Erkennungs-Index wird ergänzt"
+        self.status = Msg("maint.index")
         factory = self.embedder_factory or self._own_embedder
         index = build_index(_LockedEmbedder(factory, self.gpu_lock, self.index_name()), games=self.games, batch=32)
         if self.on_index_updated and len(index.keys):
@@ -196,23 +197,23 @@ class Maintenance:
     def prices(self) -> None:
         from .pricing.cardmarket import CardmarketPriceGuide
 
-        self.status = "Cardmarket-Preise werden geladen"
+        self.status = Msg("maint.prices")
         CardmarketPriceGuide().refresh()
 
     def price_history(self, force: bool = False) -> None:
         if "mtg" in self.games and (force or _age(_stamp("mtgjson")) > WEEK):
             from .pricing.mtgjson import import_history
 
-            self.status = "Magic-Preisverlauf (MTGJSON) wird ergänzt"
+            self.status = Msg("maint.mtgjson")
             import_history()
             _touch("mtgjson")
 
-    def _progress(self, label: str, offset_left: int | None = None):
+    def _progress(self, label: str | Msg, offset_left: int | None = None):
         def cb(done: int, total: int) -> None:
             if offset_left:
-                self.status = f"{label}: noch {offset_left - done} fehlen"
+                self.status = Msg("maint.progress_left", label=label, n=offset_left - done)
             else:
-                self.status = f"{label}: {done}/{total}"
+                self.status = Msg("maint.progress", label=label, done=done, total=total)
 
         return cb
 
@@ -229,8 +230,8 @@ class Maintenance:
         self.prices()
         self.index()
         missing = self.missing_games()
-        self.status = "bereit" + (f" ({', '.join(map(_label, missing))}: Bilder werden im Hintergrund ergänzt)"
-                                  if missing else "")
+        self.status = (Msg("status.ready_missing", games=", ".join(map(_label, missing))) if missing
+                       else Msg("status.ready"))
 
     def run_once(self) -> None:
         self.packs()
@@ -261,7 +262,7 @@ class Maintenance:
                     self.price_history()
                     self.status = ""
                 except Exception as err:  # Wartung darf die Erkennung nie stören
-                    self.status = f"Datenaktualisierung fehlgeschlagen: {err}"
+                    self.status = Msg("maint.failed", err=str(err))
                     print(f"[wartung] {err}", flush=True)
                 time.sleep(3600)
 

@@ -25,6 +25,8 @@ import numpy as np
 from cardengine import __version__
 from cardengine.card_database.names import CardNames
 from cardengine.games import parse_games
+from cardengine import i18n
+from cardengine.i18n import Msg
 from cardengine import overlay as ov
 from cardengine.overlay import OverlayRenderer
 from cardengine.pack_opening import PackSession
@@ -67,6 +69,9 @@ DEFAULT_SETTINGS = {
     "pack_show_total": True,  # Panel „Session-Wert“
     "pack_show_hits": True,  # Panel „Letzte Hits“
     "pack_panel_pos": "top_right",  # top_left | top_right | bottom_left | bottom_right
+    # Sprache der Oberfläche = OBS-Sprache ("de-DE", "en-US" …): Deutsch bei "de…", sonst Englisch.
+    # Ältere Plugins senden sie nicht → Deutsch wie bisher.
+    "ui_language": "de",
 }
 PACK_POSITIONS = ("top_left", "top_right", "bottom_left", "bottom_right")
 DOCK_ACTIVE_S = 5.0  # so lange nach der letzten Dock-Abfrage gilt das Dock als offen
@@ -79,7 +84,7 @@ class Shared:
     def __init__(self, preload_languages: list[str]):
         self.lock = threading.Lock()
         self.ready = threading.Event()
-        self._status = "Modelle werden geladen …"
+        self._status = Msg("status.loading_models")
         self.maintenance = None
         self.sessions = 0
         self.session_list: list = []  # verbundene Sitzungen (für das Dock)
@@ -99,8 +104,12 @@ class Shared:
 
     @property
     def status(self) -> str:
+        """Status als `str` (deutsch); übersetzbar mit `status_text(lang)` bzw. `i18n.t(status, lang)`."""
         m = self.maintenance.status if self.maintenance else ""
-        return f"{self._status} · {m}" if m else self._status
+        return i18n.join([self._status, m])
+
+    def status_text(self, lang: str | None) -> str:
+        return i18n.t(self.status, lang)
 
     @status.setter
     def status(self, value: str) -> None:
@@ -133,13 +142,13 @@ class Shared:
             cfg = load_config()  # Voreinstellungen aus dem Installer (data/config.json)
             games = cfg["games"]
             languages = list(dict.fromkeys([*languages, *cfg["languages"]]))
-            self.status = "Modelle werden geprüft/geladen …"
+            self.status = Msg("status.checking_models")
             ensure_models(verbose=False)
             index_name = Embedder.default_index_name()
             migrate_legacy(index_name)  # alte gemeinsame Indexdatei einmalig je Spiel aufteilen
             if not any(has_index(index_name, g) for g in games):
                 # Erster Start ohne Setup-Daten: Datenpakete bzw. Grunddaten jetzt holen/aufbauen
-                self.status = "Erster Start: Kartendaten werden geladen"
+                self.status = Msg("status.first_start")
                 self.maintenance = Maintenance(gpu_lock=self.lock, games=games)
                 self.maintenance.initial()
             self.prices = PriceService(history_days=180).start()
@@ -158,7 +167,7 @@ class Shared:
             except Exception as err:
                 print(f"[engine] Lernspeicher nicht verfügbar: {err}", flush=True)
             self.identifier = Locked(identifier, self.lock)
-            self.status = "bereit"
+            self.status = Msg("status.ready")
             self.ready.set()
             print(f"[engine] Modelle geladen in {time.time() - t0:.1f} s", flush=True)
             # Daten im Hintergrund aktuell halten (neue Sets, Magic-Bilder, Preisverlauf)
@@ -167,7 +176,7 @@ class Shared:
                 on_index_updated=self._swap_index, gpu_lock=self.lock, games=games,
             ).start()
         except Exception as err:
-            self.status = f"Fehler beim Laden: {err}"
+            self.status = Msg("status.load_error", err=str(err))
             traceback.print_exc()
 
 
@@ -238,6 +247,16 @@ class Session:
         self._last_count_log = time.time()
 
     # -------- Einstellungen
+    @property
+    def lang(self) -> str:
+        """Sprache der Oberfläche dieser Quelle: "de" oder "en" (aus `ui_language` des Plugins)."""
+        return i18n.lang_of(self.settings.get("ui_language"))
+
+    def status_text(self) -> str:
+        """Engine-Status in der Sprache dieser Quelle."""
+        st = self.shared.status
+        return i18n.t(st, self.lang)
+
     def apply_settings(self, s: dict) -> None:
         self.settings = {**DEFAULT_SETTINGS, **(s or {})}
         st = self.settings
@@ -253,7 +272,7 @@ class Session:
             scale=float(st["scale"]), show_name=bool(st["show_name"]), show_price=bool(st["show_price"]),
             show_history=bool(st["show_history"]), frame_thickness=float(st["thickness"]),
             colors={"pokemon": tuple(st["color_pokemon"]), "mtg": tuple(st["color_mtg"]), "ygo": tuple(st["color_ygo"])},
-            history_days=int(st["history_days"]),
+            history_days=int(st["history_days"]), lang=self.lang,
         )
         self.sent_versions.clear()  # Panels mit neuen Einstellungen neu senden
         if st.get("pack_enabled"):
@@ -353,13 +372,14 @@ class Session:
             return []
         now = time.time() if now is None else now
         scale = float(st.get("scale", 1.0))
+        lang = self.lang
         out = []
         if self.banner is not None and now < self.banner[0] and st.get("hit_effect") in ("frame_banner", "banner"):
             c = self.banner[1]
             line = ov.set_line(c.game, c.set_name, c.number)
             out.append(self._screen_panel(
-                "pack:banner", (c.id, c.name, c.price, frame_w, scale), "top_center",
-                lambda: ov.render_hit_banner(c.name, c.price, line, frame_w, scale)))
+                "pack:banner", (c.id, c.name, c.price, frame_w, scale, lang), "top_center",
+                lambda: ov.render_hit_banner(c.name, c.price, line, frame_w, scale, lang)))
         pos = st.get("pack_panel_pos", "top_right")
         pos = pos if pos in PACK_POSITIONS else "top_right"
         with self.shared.pack_lock:
@@ -368,12 +388,12 @@ class Session:
             recent = [(c.name, c.price) for c in pack.recent_hits(3)]
         if st.get("pack_show_total", True):
             out.append(self._screen_panel(
-                "pack:total", (total, count, n_hits, frame_w, scale), pos,
-                lambda: ov.render_pack_total(total, count, n_hits, frame_w, scale)))
+                "pack:total", (total, count, n_hits, frame_w, scale, lang), pos,
+                lambda: ov.render_pack_total(total, count, n_hits, frame_w, scale, lang)))
         if st.get("pack_show_hits", True) and recent:
             out.append(self._screen_panel(
-                "pack:hits", (tuple(recent), frame_w, scale), pos,
-                lambda: ov.render_recent_hits(recent, frame_w, scale)))
+                "pack:hits", (tuple(recent), frame_w, scale, lang), pos,
+                lambda: ov.render_recent_hits(recent, frame_w, scale, lang)))
         return out
 
     def _screen_panel(self, key: str, content, pos: str, render) -> dict:
@@ -458,8 +478,12 @@ class Session:
             if self.shm[:4] != b"TCGL":
                 raise ValueError("Shared Memory ohne gültigen Header")
             self.slot_size = int(msg["slot_size"])
-            self.apply_settings(msg.get("settings", {}))
-            send(self.sock, {"type": "welcome", "proto": PROTO, "engine": __version__, "status": self.shared.status}, self.send_lock)
+            settings = dict(msg.get("settings") or {})
+            if msg.get("ui_language") and not settings.get("ui_language"):
+                settings["ui_language"] = msg["ui_language"]
+            self.apply_settings(settings)
+            send(self.sock, {"type": "welcome", "proto": PROTO, "engine": __version__, "status": self.status_text()},
+                 self.send_lock)
             print(f"[engine] verbunden: {self.source}")
         elif t == "settings":
             self.apply_settings(msg.get("settings", {}))
@@ -494,7 +518,7 @@ class Session:
                 if not self.settings.get("enabled", True):
                     continue
                 if not self.ensure_pipeline():
-                    send(self.sock, {"type": "status", "text": self.shared.status}, self.send_lock)
+                    send(self.sock, {"type": "status", "text": self.status_text()}, self.send_lock)
                     continue
                 frame = self._read_frame(msg)
                 self.last_frame_img = frame
@@ -567,14 +591,14 @@ class Session:
         for key in [k for k in self.sent_versions
                     if ":" in k and not k.startswith("pack:") and k.split(":", 1)[0] not in sent]:
             del self.sent_versions[key]
-        res = {"type": "result", "seq": seq, "tracks": out, "status": self.shared.status}
+        res = {"type": "result", "seq": seq, "tracks": out, "status": self.status_text()}
         if events:
             res["events"] = events
         screen = self.pack_panels(shape[1], now)
         if st["debug"]:
             s = self.pipeline.stats
-            text = (f"Detektion {s.detect_ms:.0f} ms @ {s.detect_hz:.1f} Hz · Identifikation {s.identify_ms:.0f} ms · "
-                    f"Karten {len(tracks)} · {self.shared.status}")
+            text = i18n.t("status.debug", self.lang, det_ms=f"{s.detect_ms:.0f}", det_hz=f"{s.detect_hz:.1f}",
+                          id_ms=f"{s.identify_ms:.0f}", n=len(tracks), status=self.status_text())
             res["debug"] = {"detections": [d.corners.round(1).tolist() for d in self.pipeline.last_detections], "text": text}
             screen.append(self._text_panel("debug", text, shape[1]))
         # Ebenso Bildschirm-Panels, die gerade fehlen (Banner abgelaufen, Session neu …)
@@ -634,7 +658,8 @@ class Session:
                 "detections": [{"corners": d.corners, "score": d.score} for d in self.pipeline.last_detections]}
         path = self.snapshots.save(self.last_frame_img, reason, meta, force=force)
         if path and reason == "manuell":
-            send(self.sock, {"type": "status", "text": f"Snapshot gespeichert: {os.path.relpath(path, HERE)}"}, self.send_lock)
+            send(self.sock, {"type": "status", "text": i18n.t("status.snapshot_saved", self.lang,
+                                                              path=os.path.relpath(path, HERE))}, self.send_lock)
 
 
 def main():
