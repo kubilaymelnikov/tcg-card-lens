@@ -114,6 +114,11 @@ h2 .count {
 .tile { position: relative; }
 /* ✕ oben rechts: Karte ohne Angabe von Gründen ausblenden */
 .img.previewing { outline: 2px solid var(--accent, #4c8dff); outline-offset: -2px; }
+.pk-x {
+  border: 0; border-radius: 10px; min-width: 22px; height: 22px; padding: 0 6px; cursor: pointer;
+  background: rgba(229, 72, 77, .15); color: #ff5a5f; font-weight: 700; font-size: 12px; margin-left: 4px;
+}
+.pk-x:hover, .pk-x:focus-visible, .pk-x.armed { background: #e5484d; color: #fff; }
 .tile .close {
   position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%;
   background: rgba(229,72,77,.15); color: #ff5a5f; font-size: 13px; font-weight: 700; line-height: 20px; cursor: pointer; z-index: 2;
@@ -445,6 +450,8 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
       footer: 'Bestätigungen werden lokal gelernt und als Trainingsdaten gespeichert.',
       no: 'Nr. {n}', card_one: '{n} Karte', card_many: '{n} Karten', hit_one: '{n} Hit', hit_many: '{n} Hits',
       since: 'seit {t}', new_session: 'Neue Session', really_new: 'Wirklich neu?',
+      delete_session_title: 'Session komplett löschen (ohne CSV-Sicherung)', really_delete: 'Wirklich löschen?',
+      session_deleted: 'Session gelöscht.',
       new_session_title: 'Liste leeren und neu zählen (eine nicht leere Session wird vorher als CSV gesichert)',
       new_session_saved: 'Neue Session – alte gesichert: {path}', new_session_started: 'Neue Session gestartet.',
       csv_export: 'CSV exportieren',
@@ -505,6 +512,8 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
       footer: 'Confirmations are learned locally and saved as training data.',
       no: 'No. {n}', card_one: '{n} card', card_many: '{n} cards', hit_one: '{n} hit', hit_many: '{n} hits',
       since: 'since {t}', new_session: 'New session', really_new: 'Really start over?',
+      delete_session_title: 'Delete the session completely (no CSV backup)', really_delete: 'Really delete?',
+      session_deleted: 'Session deleted.',
       new_session_title: 'Clear the list and start counting again (a non-empty session is saved as CSV first)',
       new_session_saved: 'New session – previous one saved: {path}', new_session_started: 'New session started.',
       csv_export: 'Export CSV',
@@ -819,7 +828,24 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     });
     var aDl = el('a', 'btn sm', '⤓');
     aDl.href = withLang(p.csv); aDl.setAttribute('download', ''); aDl.title = T('csv_download');
-    head.appendChild(bNew); head.appendChild(bCsv); head.appendChild(aDl);
+    // ✕ oben rechts: Session komplett löschen (ohne CSV). Zweiter Klick bestätigt, wie bei „Neue Session“.
+    var bDel = el('button', 'pk-x', '✕');
+    bDel.type = 'button';
+    bDel.title = T('delete_session_title');
+    bDel.setAttribute('aria-label', T('delete_session_title'));
+    bDel.addEventListener('click', function () {
+      if (p.count && !bDel._armed) {
+        bDel._armed = true; bDel.textContent = T('really_delete'); bDel.classList.add('armed');
+        setTimeout(function () { bDel._armed = false; bDel.textContent = '✕'; bDel.classList.remove('armed'); }, 3000);
+        return;
+      }
+      bDel.disabled = true;
+      post('/api/pack/delete', { session: x.id }).then(function () {
+        toast(T('session_deleted'), 'ok');
+        pollNow();
+      }, function (err) { toast(String(err && err.message || err), 'err'); bDel.disabled = false; });
+    });
+    head.appendChild(bNew); head.appendChild(bCsv); head.appendChild(aDl); head.appendChild(bDel);
     box.appendChild(head);
     if (!p.enabled) box.appendChild(el('div', 'pk-off', T('pack_off')));
     if (!p.cards.length) {

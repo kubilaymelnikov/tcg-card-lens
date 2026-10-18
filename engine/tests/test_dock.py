@@ -305,3 +305,18 @@ def test_single_detection_does_not_stay_forever_on_still_image():
         t += 1 / 30
         tr.step(img, t)
     assert tr.tracks == []
+
+
+def test_pack_session_can_be_deleted_completely():
+    import threading
+
+    import server
+    from cardengine.pack_opening import PackSession
+
+    s = server.Session.__new__(server.Session)
+    s.source, s.hit_until, s.banner = "Kamera", {1: 2.0}, "x"
+    s.shared = SimpleNamespace(pack_sessions={"Kamera": PackSession(), "Andere": PackSession()},
+                               pack_lock=threading.RLock())
+    s.pack_delete()
+    assert "Kamera" not in s.shared.pack_sessions and "Andere" in s.shared.pack_sessions
+    assert s.hit_until == {} and s.banner is None

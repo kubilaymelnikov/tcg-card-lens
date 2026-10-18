@@ -207,6 +207,12 @@ class DockApi:
             sess.pack_reset()
         return {"ok": True, "saved": saved}
 
+    def pack_delete(self, sid: str) -> dict:
+        """Session komplett löschen (ohne CSV-Sicherung)."""
+        sess, _ = self._pack(sid)
+        sess.pack_delete()
+        return {"ok": True}
+
     def pack_export(self, sid: str, lang: str | None = None) -> dict:
         from cardengine.pack_opening import save_csv
 
@@ -682,6 +688,8 @@ def _handler(api: DockApi):
                     return self._json(api.forget(body["key"]))
                 if path == "/api/pack/reset":
                     return self._json(api.pack_reset(body["session"], self._lang))
+                if path == "/api/pack/delete":
+                    return self._json(api.pack_delete(body["session"]))
                 if path == "/api/pack/export":
                     return self._json(api.pack_export(body["session"], self._lang))
                 if path == "/api/pack/remove":

@@ -74,7 +74,8 @@ DEFAULT_SETTINGS = {
     "ui_language": "de",
 }
 PACK_POSITIONS = ("top_left", "top_right", "bottom_left", "bottom_right")
-DOCK_ACTIVE_S = 5.0  # so lange nach der letzten Dock-Abfrage gilt das Dock als offen
+DOCK_ACTIVE_S = 5.0
+STALE_S = 15.0  # so lange ohne Nachricht vom Plugin gilt eine Sitzung als tot  # so lange nach der letzten Dock-Abfrage gilt das Dock als offen
 
 
 # ---------------------------------------------------------------- gemeinsame Modelle
@@ -362,6 +363,13 @@ class Session:
             pass
         return clean
 
+    def pack_delete(self) -> None:
+        """Session der Quelle komplett verwerfen (ohne CSV). Ist Pack-Opening an, beginnt beim nächsten Treffer eine neue."""
+        with self.shared.pack_lock:
+            self.shared.pack_sessions.pop(self.source, None)
+        self.hit_until.clear()
+        self.banner = None
+
     def pack_reset(self) -> None:
         with self.shared.pack_lock:
             self.pack.reset()
@@ -444,6 +452,7 @@ class Session:
 
     # -------- Schleifen
     def run(self) -> None:
+        self.last_rx = time.time()  # letzte Nachricht des Plugins (Bilder kommen laufend → tote Verbindung erkennbar)
         self.shared.sessions += 1
         self.shared.session_list.append(self)
         worker = threading.Thread(target=self._process_loop, daemon=True)
@@ -453,6 +462,7 @@ class Session:
                 msg = recv(self.sock)
                 if msg is None:
                     break
+                self.last_rx = time.time()
                 self._handle(msg)
         except (ConnectionError, OSError, ValueError) as err:
             print(f"[engine] {self.source}: Verbindung beendet ({err})")
@@ -684,6 +694,28 @@ def main():
     srv.bind((args.host, args.port))
     srv.listen(8)
     print(f"[engine] TCG Card Lens Engine {__version__} lauscht auf {args.host}:{args.port}", flush=True)
+    def reap_stale():
+        """Sitzungen ohne Nachricht seit STALE_S schließen: Verbindung weg, ohne dass recv() es gemerkt hat (z. B. OBS
+        hart beendet). Sonst stünde die Quelle doppelt im Dock. Ein verbundener Filter schickt laufend Bilder."""
+        while True:
+            time.sleep(5)
+            now = time.time()
+            for s in list(shared.session_list):
+                if now - getattr(s, "last_rx", now) > STALE_S:
+                    print(f"[engine] {s.source}: seit {now - s.last_rx:.0f} s keine Nachricht – Sitzung geschlossen", flush=True)
+                    s.alive = False
+                    try:
+                        s.sock.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+                    try:
+                        s.sock.close()
+                    except OSError:
+                        pass
+                    if s in shared.session_list:
+                        shared.session_list.remove(s)
+
+    threading.Thread(target=reap_stale, daemon=True, name="sitzungen").start()
     if args.idle_exit > 0:
         def idle_watch():
             while True:
