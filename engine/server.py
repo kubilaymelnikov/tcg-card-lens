@@ -25,7 +25,11 @@ import numpy as np
 from cardengine import __version__
 from cardengine.card_database.names import CardNames
 from cardengine.games import parse_games
+from cardengine import i18n
+from cardengine.i18n import Msg
+from cardengine import overlay as ov
 from cardengine.overlay import OverlayRenderer
+from cardengine.pack_opening import PackSession
 from cardengine.pipeline import CardPipeline, Locked
 from cardengine.snapshots import SnapshotStore
 from cardengine.tracking import TrackerConfig
@@ -36,6 +40,7 @@ HEADER = 64
 
 DEFAULT_SETTINGS = {
     "enabled": True,
+    "auto_detect": True,  # aus: Detektor sucht nicht selbst, Karten nur gezielt per Klick/Rahmen im Dock
     "games": "both",  # both (= Pokémon + Magic) | all | pokemon | mtg | ygo | Liste/Kommaliste, z. B. "pokemon,ygo"
     "mode": "facecam",  # facecam | table
     "sensitivity": 0.4,  # Detektor-Schwelle 0..1
@@ -56,7 +61,19 @@ DEFAULT_SETTINGS = {
     "auto_snapshots": True,
     "snapshot_limit_mb": 500,
     "show_labels": "dock",  # Kennzeichen (A, B …) im Video: dock = nur solange das Dock offen ist | always | never
+    # Pack-Opening (cardengine/pack_opening.py, docs/PLUGIN.md)
+    "pack_enabled": False,
+    "pack_threshold": 10.0,  # EUR – sicher erkannte Karte ab diesem Preis = Hit
+    "hit_effect": "frame_banner",  # frame_banner | frame | banner | none
+    "hit_duration": 3.0,  # s
+    "pack_show_total": True,  # Panel „Session-Wert“
+    "pack_show_hits": True,  # Panel „Letzte Hits“
+    "pack_panel_pos": "top_right",  # top_left | top_right | bottom_left | bottom_right
+    # Sprache der Oberfläche = OBS-Sprache ("de-DE", "en-US" …): Deutsch bei "de…", sonst Englisch.
+    # Ältere Plugins senden sie nicht → Deutsch wie bisher.
+    "ui_language": "de",
 }
+PACK_POSITIONS = ("top_left", "top_right", "bottom_left", "bottom_right")
 DOCK_ACTIVE_S = 5.0  # so lange nach der letzten Dock-Abfrage gilt das Dock als offen
 
 
@@ -67,13 +84,16 @@ class Shared:
     def __init__(self, preload_languages: list[str]):
         self.lock = threading.Lock()
         self.ready = threading.Event()
-        self._status = "Modelle werden geladen …"
+        self._status = Msg("status.loading_models")
         self.maintenance = None
         self.sessions = 0
         self.session_list: list = []  # verbundene Sitzungen (für das Dock)
         self._next_sid = 0
         self._sid_lock = threading.Lock()
         self.learned = None  # cardengine.learning.LearnedStore
+        # Pack-Opening-Sessions je Quellname: überleben ein Neuverbinden des Filters (einen Engine-Neustart nicht)
+        self.pack_sessions: dict[str, PackSession] = {}
+        self.pack_lock = threading.RLock()  # Verarbeitungs-Threads und Dock-HTTP greifen zu
         self.dock_seen = 0.0  # letzte Abfrage des Docks
         self.last_activity = time.time()
         self.names = CardNames()
@@ -84,8 +104,12 @@ class Shared:
 
     @property
     def status(self) -> str:
+        """Status als `str` (deutsch); übersetzbar mit `status_text(lang)` bzw. `i18n.t(status, lang)`."""
         m = self.maintenance.status if self.maintenance else ""
-        return f"{self._status} · {m}" if m else self._status
+        return i18n.join([self._status, m])
+
+    def status_text(self, lang: str | None) -> str:
+        return i18n.t(self.status, lang)
 
     @status.setter
     def status(self, value: str) -> None:
@@ -118,13 +142,13 @@ class Shared:
             cfg = load_config()  # Voreinstellungen aus dem Installer (data/config.json)
             games = cfg["games"]
             languages = list(dict.fromkeys([*languages, *cfg["languages"]]))
-            self.status = "Modelle werden geprüft/geladen …"
+            self.status = Msg("status.checking_models")
             ensure_models(verbose=False)
             index_name = Embedder.default_index_name()
             migrate_legacy(index_name)  # alte gemeinsame Indexdatei einmalig je Spiel aufteilen
             if not any(has_index(index_name, g) for g in games):
                 # Erster Start ohne Setup-Daten: Datenpakete bzw. Grunddaten jetzt holen/aufbauen
-                self.status = "Erster Start: Kartendaten werden geladen"
+                self.status = Msg("status.first_start")
                 self.maintenance = Maintenance(gpu_lock=self.lock, games=games)
                 self.maintenance.initial()
             self.prices = PriceService(history_days=180).start()
@@ -134,6 +158,9 @@ class Shared:
             det.base.conf = 0.2
             self.detector = Locked(det, self.lock)
             identifier = CardIdentifier.load_default(games=games)
+            emb = identifier.embedder
+            print(f"[engine] Backend {emb.backend}: Detektor {getattr(det.base, 'provider', 'PyTorch')}, "
+                  f"Embedder {emb.device}", flush=True)
             try:
                 from cardengine.learning import LearnedStore
 
@@ -143,7 +170,7 @@ class Shared:
             except Exception as err:
                 print(f"[engine] Lernspeicher nicht verfügbar: {err}", flush=True)
             self.identifier = Locked(identifier, self.lock)
-            self.status = "bereit"
+            self.status = Msg("status.ready")
             self.ready.set()
             print(f"[engine] Modelle geladen in {time.time() - t0:.1f} s", flush=True)
             # Daten im Hintergrund aktuell halten (neue Sets, Magic-Bilder, Preisverlauf)
@@ -152,7 +179,7 @@ class Shared:
                 on_index_updated=self._swap_index, gpu_lock=self.lock, games=games,
             ).start()
         except Exception as err:
-            self.status = f"Fehler beim Laden: {err}"
+            self.status = Msg("status.load_error", err=str(err))
             traceback.print_exc()
 
 
@@ -218,9 +245,21 @@ class Session:
         self.sid = shared.new_sid()
         self.labels: dict[int, str] = {}  # Track-ID -> Kennzeichen (A, B …)
         self.highlight: tuple[str, float] | None = None  # (Kennzeichen, gültig bis)
+        self.hit_until: dict[int, float] = {}  # Track-ID -> Hit-Rahmen bis
+        self.banner: tuple[float, object] | None = None  # (bis, PackCard) – Hit-Banner
         self._last_count_log = time.time()
 
     # -------- Einstellungen
+    @property
+    def lang(self) -> str:
+        """Sprache der Oberfläche dieser Quelle: "de" oder "en" (aus `ui_language` des Plugins)."""
+        return i18n.lang_of(self.settings.get("ui_language"))
+
+    def status_text(self) -> str:
+        """Engine-Status in der Sprache dieser Quelle."""
+        st = self.shared.status
+        return i18n.t(st, self.lang)
+
     def apply_settings(self, s: dict) -> None:
         self.settings = {**DEFAULT_SETTINGS, **(s or {})}
         st = self.settings
@@ -230,14 +269,18 @@ class Session:
             cfg.smoothing = float(np.clip(st["smoothing"], 0, 0.9))
             self.pipeline.tracker.cfg = cfg
             self.pipeline.min_score = float(st["sensitivity"])
+            self.pipeline.auto_detect = bool(st.get("auto_detect", True))
             self.pipeline.game = parse_games(st["games"])
         self.overlay = OverlayRenderer(
             scale=float(st["scale"]), show_name=bool(st["show_name"]), show_price=bool(st["show_price"]),
             show_history=bool(st["show_history"]), frame_thickness=float(st["thickness"]),
             colors={"pokemon": tuple(st["color_pokemon"]), "mtg": tuple(st["color_mtg"]), "ygo": tuple(st["color_ygo"])},
-            history_days=int(st["history_days"]),
+            history_days=int(st["history_days"]), lang=self.lang,
         )
         self.sent_versions.clear()  # Panels mit neuen Einstellungen neu senden
+        if st.get("pack_enabled"):
+            with self.shared.pack_lock:
+                self.pack.threshold = float(st["pack_threshold"])
         self.snapshots = SnapshotStore(self.source, max_mb=float(st["snapshot_limit_mb"]))
         threading.Thread(target=self.shared.names.preload, args=(list(st["languages"]),), daemon=True).start()
         # Anzeigenamen bestehender Karten an die neue Sprache anpassen
@@ -266,6 +309,111 @@ class Session:
         self.pipeline.on_identity = self._localize
         self.apply_settings(self.settings)
         return True
+
+    # -------- Pack-Opening
+    @property
+    def pack(self) -> PackSession:
+        """Session der Quelle (beim ersten Zugriff gestartet)."""
+        with self.shared.pack_lock:
+            ps = self.shared.pack_sessions.get(self.source)
+            if ps is None:
+                ps = PackSession(threshold=float(self.settings.get("pack_threshold", 10.0)))
+                self.shared.pack_sessions[self.source] = ps
+            return ps
+
+    def pack_observe(self, tracks, now: float | None = None) -> list[dict]:
+        """Sicher erkannte Karten in die Session übernehmen; liefert neue Hit-Ereignisse (für das Plugin)."""
+        st = self.settings
+        if not st.get("pack_enabled"):
+            return []
+        now = time.time() if now is None else now
+        events = []
+        with self.shared.pack_lock:
+            pack = self.pack
+            for t in tracks:
+                if t.hidden or t.user_rejected:
+                    continue
+                entry = pack.observe(t.id, t.identity, confirmed=bool(t.confirmed), now=now)
+                if entry is None:
+                    continue
+                until = now + float(st.get("hit_duration", 3.0))
+                self.hit_until[t.id] = until
+                self.banner = (until, entry)
+                events.append({"type": "hit", "track": t.id, "key": entry.key, "name": entry.name,
+                               "price": round(entry.price, 2), "currency": entry.currency})
+        for tid in [k for k, v in self.hit_until.items() if v < now]:
+            del self.hit_until[tid]
+        for e in events:
+            print(f"[engine] {self.source}: HIT {e['name']} {e['price']:.2f} {e['currency']}", flush=True)
+        return events
+
+    # Schalter im Dock, die zu den Filtereinstellungen gehören: lokal sofort anwenden und dem Plugin melden, damit es
+    # sie in seine Eigenschaften übernimmt (dann stimmen Dock, Filterfenster und gespeicherte Szene überein)
+    DOCK_SETTINGS = {"auto_detect": bool, "pack_enabled": bool, "pack_threshold": float}
+
+    def patch_settings(self, changes: dict) -> dict:
+        clean = {k: self.DOCK_SETTINGS[k](v) for k, v in changes.items() if k in self.DOCK_SETTINGS}
+        if not clean:
+            return {}
+        self.apply_settings({**self.settings, **clean})
+        try:
+            send(self.sock, {"type": "settings_patch", "settings": clean}, self.send_lock)
+        except OSError:
+            pass
+        return clean
+
+    def pack_reset(self) -> None:
+        with self.shared.pack_lock:
+            self.pack.reset()
+        self.hit_until.clear()
+        self.banner = None
+
+    def pack_panels(self, frame_w: int, now: float | None = None) -> list[dict]:
+        """Bildschirm-Panels des Pack-Opening-Modus: Hit-Banner, Session-Wert, Letzte Hits."""
+        st = self.settings
+        if not st.get("pack_enabled"):
+            return []
+        now = time.time() if now is None else now
+        scale = float(st.get("scale", 1.0))
+        lang = self.lang
+        out = []
+        if self.banner is not None and now < self.banner[0] and st.get("hit_effect") in ("frame_banner", "banner"):
+            c = self.banner[1]
+            line = ov.set_line(c.game, c.set_name, c.number)
+            out.append(self._screen_panel(
+                "pack:banner", (c.id, c.name, c.price, frame_w, scale, lang), "top_center",
+                lambda: ov.render_hit_banner(c.name, c.price, line, frame_w, scale, lang)))
+        pos = st.get("pack_panel_pos", "top_right")
+        pos = pos if pos in PACK_POSITIONS else "top_right"
+        with self.shared.pack_lock:
+            pack = self.pack
+            total, count, n_hits = pack.total, len(pack.cards), len(pack.hits)
+            recent = [(c.name, c.price) for c in pack.recent_hits(3)]
+        if st.get("pack_show_total", True):
+            out.append(self._screen_panel(
+                "pack:total", (total, count, n_hits, frame_w, scale, lang), pos,
+                lambda: ov.render_pack_total(total, count, n_hits, frame_w, scale, lang)))
+        if st.get("pack_show_hits", True) and recent:
+            out.append(self._screen_panel(
+                "pack:hits", (tuple(recent), frame_w, scale, lang), pos,
+                lambda: ov.render_recent_hits(recent, frame_w, scale, lang)))
+        return out
+
+    def _screen_panel(self, key: str, content, pos: str, render) -> dict:
+        """Bildschirm-Panel (Anker screen); neu gerendert und gesendet nur, wenn sich `content` ändert."""
+        ver = hash(content) & 0x7FFFFFFF
+        cached = self._text_cache.get(key)
+        if cached is None or cached[1] != ver:
+            arr = np.ascontiguousarray(render())
+            cached = (time.time(), ver, int(arr.shape[1]), int(arr.shape[0]))
+            self._text_cache[key] = cached
+            self._text_data[key] = arr
+        _, ver, w, h = cached
+        p = {"key": key, "ver": ver, "anchor": "screen", "pos": pos, "w": w, "h": h}
+        if self.sent_versions.get(key) != ver:
+            p["data"] = base64.b64encode(self._text_data[key].tobytes()).decode("ascii")
+            self.sent_versions[key] = ver
+        return p
 
     # -------- Kennzeichen / Hervorhebung (Dock)
     def label_for(self, track_id: int) -> str:
@@ -333,8 +481,12 @@ class Session:
             if self.shm[:4] != b"TCGL":
                 raise ValueError("Shared Memory ohne gültigen Header")
             self.slot_size = int(msg["slot_size"])
-            self.apply_settings(msg.get("settings", {}))
-            send(self.sock, {"type": "welcome", "proto": PROTO, "engine": __version__, "status": self.shared.status}, self.send_lock)
+            settings = dict(msg.get("settings") or {})
+            if msg.get("ui_language") and not settings.get("ui_language"):
+                settings["ui_language"] = msg["ui_language"]
+            self.apply_settings(settings)
+            send(self.sock, {"type": "welcome", "proto": PROTO, "engine": __version__, "status": self.status_text()},
+                 self.send_lock)
             print(f"[engine] verbunden: {self.source}")
         elif t == "settings":
             self.apply_settings(msg.get("settings", {}))
@@ -345,6 +497,8 @@ class Session:
                 self.frame_cv.notify()
         elif t == "snapshot":
             self._snapshot("manuell", force=True)
+        elif t == "pack_reset":
+            self.pack_reset()
         elif t == "bye":
             self.alive = False
 
@@ -367,7 +521,7 @@ class Session:
                 if not self.settings.get("enabled", True):
                     continue
                 if not self.ensure_pipeline():
-                    send(self.sock, {"type": "status", "text": self.shared.status}, self.send_lock)
+                    send(self.sock, {"type": "status", "text": self.status_text()}, self.send_lock)
                     continue
                 frame = self._read_frame(msg)
                 self.last_frame_img = frame
@@ -378,7 +532,8 @@ class Session:
                 tracks = self.pipeline.process(frame)
                 self.counts["verarbeitet"] += 1
                 self._auto_snapshots()
-                send(self.sock, self._result(msg["seq"], tracks, frame.shape), self.send_lock)
+                events = self.pack_observe(tracks)
+                send(self.sock, self._result(msg["seq"], tracks, frame.shape, events), self.send_lock)
                 self.counts["gesendet"] += 1
                 if time.time() - self._last_count_log >= 5:
                     self._last_count_log = time.time()
@@ -390,9 +545,11 @@ class Session:
                 traceback.print_exc()
 
     # -------- Ergebnis
-    def _result(self, seq: int, tracks, shape) -> dict:
+    def _result(self, seq: int, tracks, shape, events: list[dict] | None = None, now: float | None = None) -> dict:
         st = self.settings
         out = []
+        now = time.time() if now is None else now
+        hit_frame = st.get("pack_enabled") and st.get("hit_effect") in ("frame_banner", "frame")
         # Kennzeichen erst freigeben, wenn der Track ganz weg ist (auch verworfene Karten können im Dock noch stehen)
         self._prune_labels({t.id for t in self.pipeline.tracker.tracks})
         hl = self.current_highlight()
@@ -420,27 +577,39 @@ class Session:
                     p["data"] = base64.b64encode(np.ascontiguousarray(img).tobytes()).decode("ascii")
                     self.sent_versions[key] = ver
                 panels.append(p)
+            hit = bool(hit_frame) and self.hit_until.get(t.id, 0.0) > now
             out.append({
                 "id": t.id,
                 "corners": t.display.round(1).tolist(),
-                "color": list(self.overlay.track_color(t)),
+                "color": list(ov.HIT_GOLD if hit else self.overlay.track_color(t)),
                 "thickness": float(st["thickness"]),
                 "state": t.state,
                 "label": label,
                 "highlight": highlighted,
+                "hit": hit,
                 "panels": panels,
             })
         # Nicht gesendete Karten gibt das Plugin samt Texturen frei → beim nächsten Auftauchen Panels neu senden
         sent = {str(o["id"]) for o in out}
-        for key in [k for k in self.sent_versions if ":" in k and k.split(":", 1)[0] not in sent]:
+        for key in [k for k in self.sent_versions
+                    if ":" in k and not k.startswith("pack:") and k.split(":", 1)[0] not in sent]:
             del self.sent_versions[key]
-        res = {"type": "result", "seq": seq, "tracks": out, "status": self.shared.status}
+        res = {"type": "result", "seq": seq, "tracks": out, "status": self.status_text()}
+        if events:
+            res["events"] = events
+        screen = self.pack_panels(shape[1], now)
         if st["debug"]:
             s = self.pipeline.stats
-            text = (f"Detektion {s.detect_ms:.0f} ms @ {s.detect_hz:.1f} Hz · Identifikation {s.identify_ms:.0f} ms · "
-                    f"Karten {len(tracks)} · {self.shared.status}")
+            text = i18n.t("status.debug", self.lang, det_ms=f"{s.detect_ms:.0f}", det_hz=f"{s.detect_hz:.1f}",
+                          id_ms=f"{s.identify_ms:.0f}", n=len(tracks), status=self.status_text())
             res["debug"] = {"detections": [d.corners.round(1).tolist() for d in self.pipeline.last_detections], "text": text}
-            res["screen_panels"] = [self._text_panel("debug", text, shape[1])]
+            screen.append(self._text_panel("debug", text, shape[1]))
+        # Ebenso Bildschirm-Panels, die gerade fehlen (Banner abgelaufen, Session neu …)
+        shown = {p["key"] for p in screen}
+        for key in [k for k in self.sent_versions if k.startswith("pack:") and k not in shown]:
+            del self.sent_versions[key]
+        if screen:
+            res["screen_panels"] = screen
         return res
 
     def _text_panel(self, key: str, text: str, frame_w: int) -> dict:
@@ -463,7 +632,7 @@ class Session:
             self._text_cache[key] = cached
             self._text_data[key] = arr
         _, ver, w, h = cached
-        p = {"key": key, "ver": ver, "anchor": "screen", "w": w, "h": h}
+        p = {"key": key, "ver": ver, "anchor": "screen", "pos": "bottom_left", "w": w, "h": h}
         if self.sent_versions.get(key) != ver:
             p["data"] = base64.b64encode(self._text_data[key].tobytes()).decode("ascii")
             self.sent_versions[key] = ver
@@ -492,7 +661,8 @@ class Session:
                 "detections": [{"corners": d.corners, "score": d.score} for d in self.pipeline.last_detections]}
         path = self.snapshots.save(self.last_frame_img, reason, meta, force=force)
         if path and reason == "manuell":
-            send(self.sock, {"type": "status", "text": f"Snapshot gespeichert: {os.path.relpath(path, HERE)}"}, self.send_lock)
+            send(self.sock, {"type": "status", "text": i18n.t("status.snapshot_saved", self.lang,
+                                                              path=os.path.relpath(path, HERE))}, self.send_lock)
 
 
 def main():

@@ -31,6 +31,7 @@ import numpy as np
 
 from . import paths
 from .card_database.catalog import CardRecord, Catalog
+from .i18n import Msg
 
 PACK_FORMAT = 1
 # Datenpakete liegen als Assets am jeweils neuesten GitHub-Release (…/releases/latest/download/<datei>).
@@ -256,7 +257,8 @@ def _download(url: str, dest: str, log) -> None:
                 done += len(chunk)
                 if time.time() - last > 2:
                     last = time.time()
-                    log(f"Datenpaket wird geladen: {done / 1e6:.0f}" + (f" / {total / 1e6:.0f} MB" if total else " MB"))
+                    log(Msg("packs.downloading_of", done=f"{done / 1e6:.0f}", total=f"{total / 1e6:.0f}") if total
+                        else Msg("packs.downloading", done=f"{done / 1e6:.0f}"))
     os.replace(dest + ".part", dest)
 
 
@@ -271,48 +273,48 @@ def install_packs(games: list[str], index_name: str, pack_dir: str | None = None
         for game in list(todo):
             found = _find_local(pack_dir, game, index_name)
             if not found:
-                log(f"{game}: kein passendes Paket in {pack_dir}")
+                log(Msg("packs.none_in_dir", game=game, dir=str(pack_dir)))
                 continue
             try:
-                log(f"{game}: Paket wird installiert ({os.path.basename(found[0])})")
+                log(Msg("packs.installing_file", game=game, file=os.path.basename(found[0])))
                 done[game] = install_pack_file(found[0], index_name, found[1], game, catalog, index_dir)
                 todo.remove(game)
             except (PackError, OSError) as err:
-                log(f"{game}: {err}")
+                log(Msg("packs.game_error", game=game, err=str(err)))
     if todo and url is None:
         url = pack_url()
     if todo and url and os.path.isdir(url):  # Basis-"URL" darf auch ein Ordner sein
         done.update(install_packs(todo, index_name, pack_dir=url, catalog=catalog, index_dir=index_dir, log=log))
         return done
     if todo and url and is_placeholder(url):
-        log("Datenpaket-Server noch nicht eingerichtet (Platzhalter-URL) – Daten werden lokal aufgebaut")
+        log(Msg("packs.placeholder"))
         return done
     if todo and url:
         try:
             listing = _fetch_listing(url)
         except Exception as err:  # kein Netz, 404 …
-            log(f"Paketliste nicht erreichbar ({err}) – Daten werden lokal aufgebaut")
+            log(Msg("packs.list_unreachable", err=str(err)))
             return done
         tmp_dir = os.path.join(paths.DATA_DIR, "packs", "download")
         for game in todo:
             entry = next((e for e in listing if e["game"] == game and e["index_name"] == index_name), None)
             if entry is None:
-                log(f"{game}: kein Paket für Modell {index_name} angeboten")
+                log(Msg("packs.no_pack_for_model", game=game, model=index_name))
                 continue
             dest = os.path.join(tmp_dir, entry["file"])
             try:
-                log(f"{game}: Datenpaket wird geladen ({entry.get('size', 0) / 1e6:.0f} MB)")
+                log(Msg("packs.downloading_game", game=game, mb=f"{entry.get('size', 0) / 1e6:.0f}"))
                 _download(f"{url.rstrip('/')}/{entry['file']}", dest, log)
-                log(f"{game}: Paket wird geprüft und installiert")
+                log(Msg("packs.verifying", game=game))
                 done[game] = install_pack_file(dest, index_name, entry.get("sha256"), game, catalog, index_dir)
             except Exception as err:
-                log(f"{game}: Paket fehlgeschlagen ({err})")
+                log(Msg("packs.failed", game=game, err=str(err)))
             finally:
                 for p in (dest, dest + ".part"):
                     if os.path.exists(p):
                         os.remove(p)
     for game, m in done.items():
-        log(f"{game}: {m['cards']} Karten, {m['vectors']} Index-Einträge (Stand {m['created'][:10]})")
+        log(Msg("packs.installed", game=game, cards=m['cards'], vectors=m['vectors'], date=m['created'][:10]))
     return done
 
 

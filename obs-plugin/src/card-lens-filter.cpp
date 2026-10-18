@@ -6,11 +6,18 @@
 #include <util/platform.h>
 #include <plugin-support.h>
 
+#ifdef HAVE_FRONTEND_API
+#include <obs-frontend-api.h>
+#endif
+
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <vector>
 
 #include "engine-client.hpp"
 #include "json.hpp"
@@ -20,15 +27,28 @@ using json = nlohmann::json;
 
 namespace {
 
-const char *kLanguages[][2] = {{"de", "Deutsch"},      {"en", "Englisch"},      {"fr", "Französisch"},
-			       {"it", "Italienisch"},  {"es", "Spanisch"},      {"pt", "Portugiesisch"},
-			       {"ja", "Japanisch"}};
+// Kartensprachen: Kürzel und Schlüssel der Bezeichnung in data/locale (Lang.de …)
+const char *kLanguages[][2] = {{"de", "Lang.de"}, {"en", "Lang.en"}, {"fr", "Lang.fr"}, {"it", "Lang.it"},
+			       {"es", "Lang.es"}, {"pt", "Lang.pt"}, {"ja", "Lang.ja"}};
 
 // Kartenspiele: je eine Checkbox (Einstellung "game_<kürzel>"), an die Engine als Kommaliste "pokemon,mtg,ygo"
 const char *kGames[][2] = {{"pokemon", "Pokémon"}, {"mtg", "Magic: The Gathering"}, {"ygo", "Yu-Gi-Oh!"}};
 
+// Pack-Opening: Szenenwechsel/Sound bei einem Hit. Läuft im UI-Thread (obs_queue_task); der Zustand lebt in einem
+// shared_ptr, damit eine noch ausstehende Aufgabe nach dem Löschen des Filters nichts Freigegebenes anfasst.
+struct HitActions {
+	std::mutex mutex;
+	std::string scene;         // Ziel-Szene ("" = kein Wechsel)
+	double return_s = 0.0;     // nach so vielen Sekunden zurück (0 = in der Hit-Szene bleiben)
+	std::string sound;         // Medienquelle ("" = kein Sound)
+	std::string return_to;     // Szene vor dem Wechsel
+	uint64_t return_at_ns = 0; // 0 = kein Rückwechsel geplant
+};
+
 struct Filter {
 	obs_source_t *source = nullptr;
+	std::shared_ptr<HitActions> hit = std::make_shared<HitActions>();
+	bool pack_enabled = false;
 	std::unique_ptr<EngineClient> client;
 	OverlayDrawer drawer;
 	OverlayStyle style;
@@ -79,6 +99,13 @@ std::string games_setting(obs_data_t *s)
 	return out.empty() ? "both" : out; // nichts gewählt → wie bisher Pokémon + Magic
 }
 
+// Sprache der OBS-Oberfläche, z. B. "de-DE" oder "en-US" (Engine: Deutsch bei "de…", sonst Englisch)
+std::string ui_language()
+{
+	const char *loc = obs_get_locale();
+	return loc && *loc ? loc : "en-US";
+}
+
 std::string settings_to_json(obs_data_t *s)
 {
 	json langs = json::array();
@@ -89,6 +116,7 @@ std::string settings_to_json(obs_data_t *s)
 		langs.push_back("en");
 	json j = {
 		{"enabled", obs_data_get_bool(s, "enabled")},
+		{"auto_detect", obs_data_get_bool(s, "auto_detect")},
 		{"games", games_setting(s)},
 		{"mode", obs_data_get_string(s, "mode")},
 		{"sensitivity", obs_data_get_double(s, "sensitivity")},
@@ -108,6 +136,15 @@ std::string settings_to_json(obs_data_t *s)
 		{"debug", obs_data_get_bool(s, "debug")},
 		{"auto_snapshots", obs_data_get_bool(s, "auto_snapshots")},
 		{"snapshot_limit_mb", obs_data_get_int(s, "snapshot_limit_mb")},
+		{"pack_enabled", obs_data_get_bool(s, "pack_enabled")},
+		{"pack_threshold", obs_data_get_double(s, "pack_threshold")},
+		{"hit_effect", obs_data_get_string(s, "hit_effect")},
+		{"hit_duration", obs_data_get_double(s, "hit_duration")},
+		{"pack_show_total", obs_data_get_bool(s, "pack_show_total")},
+		{"pack_show_hits", obs_data_get_bool(s, "pack_show_hits")},
+		{"pack_panel_pos", obs_data_get_string(s, "pack_panel_pos")},
+		// Sprache der Oberfläche (Overlay-Texte, Status, Dock) folgt der OBS-Sprache, z. B. "de-DE", "en-US"
+		{"ui_language", ui_language()},
 	};
 	return j.dump();
 }
@@ -139,6 +176,11 @@ void filter_update(void *data, obs_data_t *s)
 	f->client->set_endpoint(obs_data_get_string(s, "engine_host"), (int)obs_data_get_int(s, "engine_port"));
 	f->client->set_autostart(obs_data_get_bool(s, "engine_autostart"), obs_data_get_string(s, "engine_command"));
 	f->client->set_settings(settings_to_json(s));
+	f->pack_enabled = obs_data_get_bool(s, "pack_enabled");
+	std::lock_guard<std::mutex> lock(f->hit->mutex);
+	f->hit->scene = obs_data_get_string(s, "hit_scene");
+	f->hit->return_s = obs_data_get_double(s, "hit_scene_return");
+	f->hit->sound = obs_data_get_string(s, "hit_sound");
 }
 
 void *filter_create(obs_data_t *settings, obs_source_t *source)
@@ -172,6 +214,7 @@ void filter_destroy(void *data)
 void filter_defaults(obs_data_t *s)
 {
 	obs_data_set_default_bool(s, "enabled", true);
+	obs_data_set_default_bool(s, "auto_detect", true);
 	obs_data_set_default_bool(s, "game_pokemon", true);
 	obs_data_set_default_bool(s, "game_mtg", true);
 	obs_data_set_default_bool(s, "game_ygo", true); // ohne installierte Yu-Gi-Oh-Daten sucht die Engine dort einfach nichts
@@ -196,6 +239,16 @@ void filter_defaults(obs_data_t *s)
 	obs_data_set_default_bool(s, "debug", false);
 	obs_data_set_default_bool(s, "auto_snapshots", true);
 	obs_data_set_default_int(s, "snapshot_limit_mb", 500);
+	obs_data_set_default_bool(s, "pack_enabled", false);
+	obs_data_set_default_double(s, "pack_threshold", 10.0);
+	obs_data_set_default_string(s, "hit_effect", "frame_banner");
+	obs_data_set_default_double(s, "hit_duration", 3.0);
+	obs_data_set_default_bool(s, "pack_show_total", true);
+	obs_data_set_default_bool(s, "pack_show_hits", true);
+	obs_data_set_default_string(s, "pack_panel_pos", "top_right");
+	obs_data_set_default_string(s, "hit_scene", "");
+	obs_data_set_default_double(s, "hit_scene_return", 8.0);
+	obs_data_set_default_string(s, "hit_sound", "");
 	obs_data_set_default_string(s, "engine_host", "127.0.0.1");
 	obs_data_set_default_int(s, "engine_port", 47820);
 	// Autostart standardmäßig an: Der Installer legt die Engine unter %LOCALAPPDATA%\TCGCardLens\engine ab
@@ -207,6 +260,77 @@ bool snapshot_clicked(obs_properties_t *, obs_property_t *, void *data)
 {
 	static_cast<Filter *>(data)->client->request_snapshot();
 	return false;
+}
+
+#ifdef HAVE_FRONTEND_API
+std::string url_encode(const std::string &v)
+{
+	static const char *hex = "0123456789ABCDEF";
+	std::string out;
+	for (unsigned char c : v) {
+		if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+			out += char(c);
+		} else {
+			out += '%';
+			out += hex[c >> 4];
+			out += hex[c & 15];
+		}
+	}
+	return out;
+}
+
+// Session-Anzeige (Pack-Opening) als Browser-Quelle in die aktuelle Szene legen – frei platzierbar und skalierbar.
+// Die Seite liefert die Engine (Dock-Server, Port = Engine-Port + 10).
+bool add_session_display_clicked(obs_properties_t *, obs_property_t *, void *data)
+{
+	auto *f = static_cast<Filter *>(data);
+	obs_source_t *parent = obs_filter_get_parent(f->source);
+	const char *pname = parent ? obs_source_get_name(parent) : "";
+	obs_data_t *fs = obs_source_get_settings(f->source);
+	const long long port = obs_data_get_int(fs, "engine_port");
+	obs_data_release(fs);
+	const std::string url = "http://127.0.0.1:" + std::to_string((port > 0 ? port : 47820) + 10) +
+				"/session?source=" + url_encode(pname ? pname : "");
+	const std::string name = std::string("TCG Card Lens – Session (") + (pname ? pname : "") + ")";
+
+	obs_source_t *src = obs_get_source_by_name(name.c_str()); // schon vorhanden: nur zur Szene hinzufügen
+	if (!src) {
+		obs_data_t *bs = obs_data_create();
+		obs_data_set_string(bs, "url", url.c_str());
+		obs_data_set_int(bs, "width", 520);
+		obs_data_set_int(bs, "height", 380);
+		obs_data_set_string(bs, "css", "body { background-color: rgba(0, 0, 0, 0); margin: 0; overflow: hidden; }");
+		src = obs_source_create("browser_source", name.c_str(), bs, nullptr);
+		obs_data_release(bs);
+	}
+	obs_source_t *scene_src = obs_frontend_get_current_scene();
+	if (src && scene_src) {
+		if (obs_scene_t *scene = obs_scene_from_source(scene_src))
+			obs_scene_add(scene, src);
+	}
+	if (!src)
+		obs_log(LOG_WARNING, "Browser-Quelle konnte nicht angelegt werden (obs-browser fehlt?)");
+	obs_source_release(scene_src);
+	obs_source_release(src);
+	return false;
+}
+#endif
+
+bool pack_reset_clicked(obs_properties_t *, obs_property_t *, void *data)
+{
+	static_cast<Filter *>(data)->client->request_pack_reset();
+	return false;
+}
+
+bool add_media_source(void *param, obs_source_t *src)
+{
+	// Medienquellen (Medienquelle, VLC …) für den Hit-Sound
+	if (obs_source_get_output_flags(src) & OBS_SOURCE_CONTROLLABLE_MEDIA) {
+		const char *name = obs_source_get_name(src);
+		if (name && *name)
+			obs_property_list_add_string(static_cast<obs_property_t *>(param), name, name);
+	}
+	return true;
 }
 
 bool refresh_status(obs_properties_t *props, obs_property_t *, void *data)
@@ -229,6 +353,7 @@ obs_properties_t *filter_properties(void *data)
 	// Allgemein
 	obs_properties_t *g = obs_properties_create();
 	obs_properties_add_bool(g, "enabled", obs_module_text("Enabled"));
+	obs_properties_add_bool(g, "auto_detect", obs_module_text("AutoDetect"));
 	obs_properties_add_text(g, "games_label", obs_module_text("Games"), OBS_TEXT_INFO);
 	for (auto &game : kGames)
 		obs_properties_add_bool(g, (std::string("game_") + game[0]).c_str(), game[1]);
@@ -246,11 +371,11 @@ obs_properties_t *filter_properties(void *data)
 	// Sprachen
 	obs_properties_t *l = obs_properties_create();
 	for (auto &lang : kLanguages)
-		obs_properties_add_bool(l, (std::string("lang_") + lang[0]).c_str(), lang[1]);
+		obs_properties_add_bool(l, (std::string("lang_") + lang[0]).c_str(), obs_module_text(lang[1]));
 	obs_property_t *disp = obs_properties_add_list(l, "display_language", obs_module_text("DisplayLanguage"),
 						       OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
 	for (auto &lang : kLanguages)
-		obs_property_list_add_string(disp, lang[1], lang[0]);
+		obs_property_list_add_string(disp, obs_module_text(lang[1]), lang[0]);
 	obs_properties_add_group(props, "grp_lang", obs_module_text("Group.Languages"), OBS_GROUP_NORMAL, l);
 
 	// Overlay
@@ -270,6 +395,52 @@ obs_properties_t *filter_properties(void *data)
 	obs_properties_add_color(o, "color_ygo", obs_module_text("ColorYgo"));
 	obs_properties_add_group(props, "grp_overlay", obs_module_text("Group.Overlay"), OBS_GROUP_NORMAL, o);
 
+	// Pack-Opening
+	obs_properties_t *pk = obs_properties_create();
+	obs_properties_add_bool(pk, "pack_enabled", obs_module_text("PackEnabled"));
+	obs_property_t *thr = obs_properties_add_float(pk, "pack_threshold", obs_module_text("PackThreshold"), 0.01,
+						       100000.0, 0.05);
+	obs_property_float_set_suffix(thr, " €");
+	obs_property_t *eff = obs_properties_add_list(pk, "hit_effect", obs_module_text("HitEffect"), OBS_COMBO_TYPE_LIST,
+						      OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(eff, obs_module_text("HitEffect.FrameBanner"), "frame_banner");
+	obs_property_list_add_string(eff, obs_module_text("HitEffect.Frame"), "frame");
+	obs_property_list_add_string(eff, obs_module_text("HitEffect.Banner"), "banner");
+	obs_property_list_add_string(eff, obs_module_text("HitEffect.None"), "none");
+	obs_property_t *dur = obs_properties_add_float_slider(pk, "hit_duration", obs_module_text("HitDuration"), 1.0,
+							      10.0, 0.5);
+	obs_property_float_set_suffix(dur, " s");
+	obs_properties_add_bool(pk, "pack_show_total", obs_module_text("PackShowTotal"));
+	obs_properties_add_bool(pk, "pack_show_hits", obs_module_text("PackShowHits"));
+	obs_property_t *pos = obs_properties_add_list(pk, "pack_panel_pos", obs_module_text("PackPanelPos"),
+						      OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(pos, obs_module_text("Pos.TopRight"), "top_right");
+	obs_property_list_add_string(pos, obs_module_text("Pos.TopLeft"), "top_left");
+	obs_property_list_add_string(pos, obs_module_text("Pos.BottomRight"), "bottom_right");
+	obs_property_list_add_string(pos, obs_module_text("Pos.BottomLeft"), "bottom_left");
+	obs_property_t *scene = obs_properties_add_list(pk, "hit_scene", obs_module_text("HitScene"),
+							OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(scene, obs_module_text("None"), "");
+#ifdef HAVE_FRONTEND_API
+	if (char **names = obs_frontend_get_scene_names()) {
+		for (char **n = names; *n; n++)
+			obs_property_list_add_string(scene, *n, *n);
+		bfree(names);
+	}
+#endif
+	obs_property_t *ret = obs_properties_add_float(pk, "hit_scene_return", obs_module_text("HitSceneReturn"), 0.0,
+						       600.0, 1.0);
+	obs_property_float_set_suffix(ret, " s");
+	obs_property_t *snd = obs_properties_add_list(pk, "hit_sound", obs_module_text("HitSound"), OBS_COMBO_TYPE_LIST,
+						      OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(snd, obs_module_text("None"), "");
+	obs_enum_sources(add_media_source, snd);
+	obs_properties_add_button(pk, "pack_reset", obs_module_text("PackReset"), pack_reset_clicked);
+#ifdef HAVE_FRONTEND_API
+	obs_properties_add_button(pk, "pack_add_display", obs_module_text("PackAddDisplay"), add_session_display_clicked);
+#endif
+	obs_properties_add_group(props, "grp_pack", obs_module_text("Group.Pack"), OBS_GROUP_NORMAL, pk);
+
 	// Debug
 	obs_properties_t *d = obs_properties_create();
 	obs_properties_add_bool(d, "debug", obs_module_text("Debug"));
@@ -284,9 +455,136 @@ obs_properties_t *filter_properties(void *data)
 	obs_properties_add_int(e, "engine_port", obs_module_text("EnginePort"), 1024, 65535, 1);
 	obs_properties_add_bool(e, "engine_autostart", obs_module_text("EngineAutostart"));
 	obs_properties_add_path(e, "engine_command", obs_module_text("EngineCommand"), OBS_PATH_FILE,
-				"Startskript (*.cmd *.bat *.exe)", nullptr);
+				obs_module_text("EngineCommand.Filter"), nullptr);
 	obs_properties_add_group(props, "grp_engine", obs_module_text("Group.Engine"), OBS_GROUP_NORMAL, e);
 	return props;
+}
+
+// ------------------------------------------------------------------ Pack-Opening: Szene / Sound (UI-Thread)
+
+struct HitTask {
+	std::shared_ptr<HitActions> state;
+	bool back = false; // true: Rückwechsel zur vorherigen Szene
+};
+
+std::string current_scene_name()
+{
+#ifdef HAVE_FRONTEND_API
+	obs_source_t *cur = obs_frontend_get_current_scene();
+	std::string name = cur ? obs_source_get_name(cur) : "";
+	obs_source_release(cur);
+	return name;
+#else
+	return "";
+#endif
+}
+
+void switch_scene(const std::string &name)
+{
+#ifdef HAVE_FRONTEND_API
+	obs_source_t *src = obs_get_source_by_name(name.c_str());
+	if (src && obs_scene_from_source(src))
+		obs_frontend_set_current_scene(src); // im Studio-Modus: Übergang ins Programm
+	else
+		obs_log(LOG_WARNING, "Hit-Szene \"%s\" nicht gefunden", name.c_str());
+	obs_source_release(src);
+#else
+	(void)name;
+#endif
+}
+
+void hit_task(void *param)
+{
+	std::unique_ptr<HitTask> task(static_cast<HitTask *>(param));
+	HitActions &a = *task->state;
+	std::unique_lock<std::mutex> lock(a.mutex);
+	if (task->back) {
+		const std::string to = a.return_to, from = a.scene;
+		lock.unlock();
+		// Nur zurück, wenn noch die Hit-Szene läuft (sonst hat jemand bewusst umgeschaltet)
+		if (!to.empty() && current_scene_name() == from)
+			switch_scene(to);
+		return;
+	}
+	const std::string scene = a.scene, sound = a.sound;
+	const double ret = a.return_s;
+	lock.unlock();
+	if (!sound.empty()) {
+		obs_source_t *src = obs_get_source_by_name(sound.c_str());
+		if (src)
+			obs_source_media_restart(src); // Quelle muss in einer laufenden Szene liegen, sonst hört man nichts
+		else
+			obs_log(LOG_WARNING, "Hit-Sound \"%s\" nicht gefunden", sound.c_str());
+		obs_source_release(src);
+	}
+	if (!scene.empty()) {
+		const std::string before = current_scene_name();
+		if (before != scene)
+			switch_scene(scene);
+		if (ret > 0.0) {
+			lock.lock();
+			// Bei mehreren Hits in Folge bleibt die ursprüngliche Szene das Rückkehrziel
+			if (before != scene)
+				a.return_to = before;
+			a.return_at_ns = os_gettime_ns() + uint64_t(ret * 1e9);
+		}
+	}
+}
+
+// Einstellungsänderung aus dem Dock in die Filtereigenschaften übernehmen (UI-Thread). obs_source_update ruft
+// danach wie bei einer Änderung im Eigenschaftenfenster `update` auf – so bekommt auch die Engine den neuen Stand.
+struct SettingsPatchTask {
+	obs_source_t *source; // eigene Referenz, wird im Task freigegeben
+	std::string patch;
+};
+
+void settings_patch_task(void *param)
+{
+	std::unique_ptr<SettingsPatchTask> t(static_cast<SettingsPatchTask *>(param));
+	json p = json::parse(t->patch, nullptr, false);
+	if (p.is_object()) {
+		obs_data_t *d = obs_data_create();
+		for (auto it = p.begin(); it != p.end(); ++it) {
+			if (it->is_boolean())
+				obs_data_set_bool(d, it.key().c_str(), it->get<bool>());
+			else if (it->is_number_integer())
+				obs_data_set_int(d, it.key().c_str(), it->get<long long>());
+			else if (it->is_number())
+				obs_data_set_double(d, it.key().c_str(), it->get<double>());
+			else if (it->is_string())
+				obs_data_set_string(d, it.key().c_str(), it->get<std::string>().c_str());
+		}
+		obs_source_update(t->source, d);
+		obs_data_release(d);
+		obs_log(LOG_INFO, "Einstellungen aus dem Dock übernommen: %s", t->patch.c_str());
+	}
+	obs_source_release(t->source);
+}
+
+void filter_tick(void *data, float)
+{
+	auto *f = static_cast<Filter *>(data);
+	const std::string patch = f->client->take_settings_patch();
+	if (!patch.empty()) {
+		if (obs_source_t *ref = obs_source_get_ref(f->source))
+			obs_queue_task(OBS_TASK_UI, settings_patch_task, new SettingsPatchTask{ref, patch}, false);
+	}
+	std::vector<HitEvent> events = f->client->take_events();
+	if (!events.empty() && f->pack_enabled) {
+		const HitEvent &e = events.back();
+		obs_log(LOG_INFO, "Hit: %s %.2f %s", e.name.c_str(), e.price, e.currency.c_str());
+		obs_queue_task(OBS_TASK_UI, hit_task, new HitTask{f->hit, false}, false);
+	}
+	bool back = false;
+	{
+		std::lock_guard<std::mutex> lock(f->hit->mutex);
+		if (f->hit->return_at_ns && os_gettime_ns() >= f->hit->return_at_ns) {
+			f->hit->return_at_ns = 0;
+			back = true;
+		}
+	}
+	if (back)
+		obs_queue_task(OBS_TASK_UI, hit_task, new HitTask{f->hit, true}, false);
 }
 
 // ------------------------------------------------------------------ Rendern
@@ -404,5 +702,6 @@ struct obs_source_info card_lens_filter_info = [] {
 	info.get_defaults = filter_defaults;
 	info.get_properties = filter_properties;
 	info.video_render = filter_render;
+	info.video_tick = filter_tick;
 	return info;
 }();

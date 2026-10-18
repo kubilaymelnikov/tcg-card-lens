@@ -15,7 +15,15 @@ struct PanelRef {
 	std::string key;
 	uint32_t ver = 0;
 	std::string anchor; // "top" | "bottom" | "corner" | "screen"
+	std::string pos;    // nur "screen": top_left | top_center | top_right | bottom_left | bottom_right (leer = bottom_left)
 	int w = 0, h = 0;
+};
+
+// Pack-Opening: sicher erkannte Karte über der Hit-Schwelle (Engine meldet jeden Hit genau einmal)
+struct HitEvent {
+	int track = 0;
+	std::string key, name, currency;
+	double price = 0.0;
 };
 
 struct TrackResult {
@@ -25,6 +33,7 @@ struct TrackResult {
 	float thickness = 3.f;
 	std::string label;      // Kennzeichen (optional; ältere Engine: leer)
 	bool highlight = false; // Rahmen pulsierend mit Außenschein (optional)
+	bool hit = false;       // Pack-Opening: goldener, pulsierender Hit-Rahmen (optional)
 	std::vector<PanelRef> panels;
 };
 
@@ -53,6 +62,7 @@ public:
 	void set_endpoint(const std::string &host, int port);
 	void set_autostart(bool enabled, const std::string &command);
 	void request_snapshot();
+	void request_pack_reset(); // Pack-Opening: neue Session
 
 	// Grafik-Thread: freien Slot holen (nullptr, wenn nicht verbunden), dann Frame melden
 	uint8_t *acquire_slot(int width, int height, int &slot, int &stride);
@@ -60,7 +70,11 @@ public:
 
 	bool latest_result(ResultFrame &out, uint64_t &last_seq);
 	std::vector<PanelImage> take_panel_updates();
+	std::vector<HitEvent> take_events(); // Hit-Ereignisse seit dem letzten Aufruf (gehen nicht verloren, wenn
+					     // ein Ergebnis vom nächsten überholt wird)
 	std::string status();
+	// Einstellungsänderung aus dem Dock (JSON-Objekt, z. B. {"auto_detect": false}); leer, wenn keine anliegt
+	std::string take_settings_patch();
 	bool connected() const { return connected_.load(); }
 
 	static constexpr int kMaxWidth = 1920;
@@ -89,12 +103,15 @@ private:
 	std::string settings_json_ = "{}";
 	bool settings_dirty_ = true;
 	bool snapshot_requested_ = false;
+	bool pack_reset_requested_ = false;
 	bool frame_pending_ = false;
 	int pending_slot_ = 0, pending_w_ = 0, pending_h_ = 0, pending_stride_ = 0;
 	uint64_t seq_ = 0;
 	int next_slot_ = 0;
 	ResultFrame result_;
 	std::vector<PanelImage> panel_updates_;
+	std::vector<HitEvent> events_;
+	std::string settings_patch_; // noch nicht übernommene Einstellungsänderung aus dem Dock
 	std::string status_ = "Engine nicht verbunden";
 	bool autostart_ = false;
 	std::string autostart_cmd_;

@@ -74,6 +74,8 @@ void parse_panels(const json &arr, std::vector<PanelRef> &out, std::vector<Panel
 		ref.key = p.value("key", "");
 		ref.ver = p.value("ver", 0u);
 		ref.anchor = p.value("anchor", "bottom");
+		if (p.contains("pos") && p["pos"].is_string())
+			ref.pos = p["pos"].get<std::string>();
 		ref.w = p.value("w", 0);
 		ref.h = p.value("h", 0);
 		if (p.contains("data")) {
@@ -159,6 +161,13 @@ void EngineClient::request_snapshot()
 	send_cv_.notify_all();
 }
 
+void EngineClient::request_pack_reset()
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	pack_reset_requested_ = true;
+	send_cv_.notify_all();
+}
+
 uint8_t *EngineClient::acquire_slot(int width, int height, int &slot, int &stride)
 {
 	if (!connected_ || !shm_ || width > kMaxWidth || height > kMaxHeight)
@@ -196,6 +205,22 @@ std::vector<PanelImage> EngineClient::take_panel_updates()
 	std::lock_guard<std::mutex> lock(mutex_);
 	std::vector<PanelImage> out;
 	out.swap(panel_updates_);
+	return out;
+}
+
+std::string EngineClient::take_settings_patch()
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	std::string out;
+	out.swap(settings_patch_);
+	return out;
+}
+
+std::vector<HitEvent> EngineClient::take_events()
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	std::vector<HitEvent> out;
+	out.swap(events_);
 	return out;
 }
 
@@ -263,6 +288,11 @@ bool EngineClient::connect_once()
 		std::lock_guard<std::mutex> lock(mutex_);
 		hello["settings"] = json::parse(settings_json_, nullptr, false);
 		settings_dirty_ = false;
+	}
+	{
+		// Sprache der Oberfläche (steht auch in den Einstellungen; hier zusätzlich direkt im hello)
+		const char *loc = obs_get_locale();
+		hello["ui_language"] = loc && *loc ? loc : "en-US";
 	}
 	if (!send_json(hello.dump())) {
 		disconnect();
@@ -347,7 +377,7 @@ void EngineClient::net_loop()
 			if (!connect_once()) {
 				{
 					std::lock_guard<std::mutex> lock(mutex_);
-					status_ = "Engine nicht erreichbar – wird gesucht …";
+					status_ = obs_module_text("Status.Searching");
 				}
 				if (++failures >= 2)
 					maybe_autostart();
@@ -395,7 +425,20 @@ void EngineClient::handle_message(const std::string &text)
 	const std::string type = msg.value("type", "");
 	if (type == "welcome" || type == "status") {
 		std::lock_guard<std::mutex> lock(mutex_);
-		status_ = type == "welcome" ? "Verbunden – " + msg.value("status", "") : msg.value("text", "");
+		status_ = type == "welcome" ? std::string(obs_module_text("Status.Connected")) + " – " + msg.value("status", "")
+					    : msg.value("text", "");
+		return;
+	}
+	if (type == "settings_patch") {
+		// Schalter im Dock: der Filter übernimmt sie in seine Eigenschaften (UI-Thread, siehe filter_tick)
+		if (msg.contains("settings") && msg["settings"].is_object()) {
+			std::lock_guard<std::mutex> lock(mutex_);
+			json merged = settings_patch_.empty() ? json::object() : json::parse(settings_patch_, nullptr, false);
+			if (merged.is_discarded())
+				merged = json::object();
+			merged.update(msg["settings"]);
+			settings_patch_ = merged.dump();
+		}
 		return;
 	}
 	if (type != "result")
@@ -420,6 +463,8 @@ void EngineClient::handle_message(const std::string &text)
 			tr.label = t["label"].get<std::string>();
 		if (t.contains("highlight") && t["highlight"].is_boolean())
 			tr.highlight = t["highlight"].get<bool>();
+		if (t.contains("hit") && t["hit"].is_boolean())
+			tr.hit = t["hit"].get<bool>();
 		parse_panels(t["panels"], tr.panels, updates);
 		r.tracks.push_back(std::move(tr));
 	}
@@ -435,11 +480,30 @@ void EngineClient::handle_message(const std::string &text)
 	}
 	if (msg.contains("screen_panels"))
 		parse_panels(msg["screen_panels"], r.screen_panels, updates);
+	std::vector<HitEvent> events;
+	if (msg.contains("events") && msg["events"].is_array()) {
+		for (const auto &e : msg["events"]) {
+			if (!e.is_object() || e.value("type", "") != "hit")
+				continue;
+			HitEvent h;
+			h.track = e.value("track", 0);
+			h.key = e.value("key", "");
+			h.name = e.value("name", "");
+			h.currency = e.value("currency", "EUR");
+			h.price = e.value("price", 0.0);
+			events.push_back(std::move(h));
+		}
+	}
 	std::lock_guard<std::mutex> lock(mutex_);
 	result_ = std::move(r);
+	for (auto &e : events)
+		events_.push_back(std::move(e));
+	if (events_.size() > 32) // niemand holt ab (Filter unsichtbar): nicht unbegrenzt sammeln
+		events_.erase(events_.begin(), events_.end() - 32);
 	for (auto &u : updates)
 		panel_updates_.push_back(std::move(u));
-	status_ = "Verbunden – " + msg.value("status", std::string("bereit"));
+	status_ = std::string(obs_module_text("Status.Connected")) + " – " +
+		  msg.value("status", std::string(obs_module_text("Status.Ready")));
 }
 
 void EngineClient::send_loop()
@@ -449,7 +513,8 @@ void EngineClient::send_loop()
 		{
 			std::unique_lock<std::mutex> lock(mutex_);
 			send_cv_.wait_for(lock, std::chrono::milliseconds(500), [this] {
-				return !running_ || (connected_ && (settings_dirty_ || snapshot_requested_ || frame_pending_));
+				return !running_ || (connected_ && (settings_dirty_ || snapshot_requested_ ||
+								     pack_reset_requested_ || frame_pending_));
 			});
 			if (!running_)
 				break;
@@ -462,6 +527,9 @@ void EngineClient::send_loop()
 			} else if (snapshot_requested_) {
 				payload = R"({"type":"snapshot"})";
 				snapshot_requested_ = false;
+			} else if (pack_reset_requested_) {
+				payload = R"({"type":"pack_reset"})";
+				pack_reset_requested_ = false;
 			} else if (frame_pending_) {
 				json m = {{"type", "frame"},  {"seq", ++seq_},          {"slot", pending_slot_},
 					  {"width", pending_w_}, {"height", pending_h_}, {"stride", pending_stride_},

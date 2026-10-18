@@ -219,3 +219,18 @@ def test_unlocked_card_still_expires_without_detections():
     tr.update([Detection(order_corners(QUAD), 0.9)], 0.0)
     blank = np.full((720, 1280, 3), (60, 90, 120), np.uint8)  # Karte weg
     assert not tr.step(blank, 1.5)
+
+
+def test_iou_quads_robust_for_nearly_identical_quads():
+    """cv2.intersectConvexConvex lieferte bei Abweichungen um 1e-4 px gelegentlich viel zu kleine Werte."""
+    rng = np.random.default_rng(1)
+    for _ in range(2000):
+        c = rng.uniform(100, 1000, 2)
+        q = order_corners(cv2.boxPoints(((c[0], c[1]), (rng.uniform(80, 300), rng.uniform(100, 420)),
+                                         rng.uniform(0, 180))).astype(np.float32))
+        q = q + rng.normal(0, 2, q.shape).astype(np.float32)
+        q2 = q + rng.uniform(-1e-4, 1e-4, q.shape).astype(np.float32)
+        assert iou_quads(q, q2) > 0.99
+    a = np.float32([[0, 0], [100, 0], [100, 140], [0, 140]])
+    assert iou_quads(a, a + np.float32([200, 0])) == 0.0  # getrennt
+    assert abs(iou_quads(a, a + np.float32([50, 0])) - 1 / 3) < 1e-6  # halb überlappend: 50/150

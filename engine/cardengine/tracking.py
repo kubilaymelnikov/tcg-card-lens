@@ -152,10 +152,11 @@ class CardTracker:
             t.motion = float(region.mean()) if region.size else 0.0
             if t.motion < cfg.motion_still:
                 t.still_frames += 1
-                if t.locked:
+                if t.locked and t.stable:
                     # Fixierte Karte, Bildbereich unverändert → sie liegt noch da, auch wenn der (bei ruhigem
                     # Bild seltene) Detektor gerade nichts meldet. Ohne das verfiel sie nach der Haltezeit und
-                    # wurde neu erkannt ("Zurücksetzen").
+                    # wurde neu erkannt ("Zurücksetzen"). Nur für bestätigte Tracks: eine einmalige
+                    # Fehldetektion (z. B. Kante der Spielmatte) soll nicht ewig als Geister-Rahmen stehen bleiben.
                     t.last_confirmed = max(t.last_confirmed, self._now)
                 if not t.locked and t.still_frames >= cfg.lock_after_frames:
                     t.locked, t.samples, t.outliers = True, [t.corners.copy()], 0

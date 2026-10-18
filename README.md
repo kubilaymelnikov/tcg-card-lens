@@ -1,27 +1,33 @@
 # TCG Card Lens
 
+**Deutsch** · [English](README.en.md)
+
 **OBS-Plugin, das Sammelkarten im Kamerabild erkennt und ihren Cardmarket-Preis einblendet** – für
-**Pokémon**, **Magic: The Gathering** und **Yu-Gi-Oh!**. Läuft lokal auf deiner NVIDIA-GPU, ohne Cloud-Dienst.
+**Pokémon**, **Magic: The Gathering** und **Yu-Gi-Oh!**. Läuft lokal auf deiner Grafikkarte (NVIDIA, AMD oder Intel per DirectML), ohne Cloud-Dienst.
 
 - Mehrere Karten gleichzeitig, auch schräg, gedreht oder im Toploader
 - Rahmen um jede Karte, darüber der Name (auf Wunsch auf Deutsch), darunter Preis, Trend und Preisverlauf
 - **Keine falschen Preise:** Ist der genaue Druck nicht sicher, steht „Druck unsicher – kein Preis“
 - **Karten-Dock in OBS:** unsichere Karten bestätigen oder korrigieren, Karte im Video hervorheben, Cardmarket-Link
 - **Lernt aus Bestätigungen:** einmal bestätigt, wird dieselbe Karte unter deinem Licht sofort sicher erkannt
+- **Pack-Opening-Modus:** wertvolle Karten (ab einstellbarer Schwelle, Standard 10 €) lösen einen Hit-Effekt aus –
+  goldener Rahmen, Banner „HIT! 168,73 €“, auf Wunsch Szenenwechsel und Sound; dazu Session-Liste mit Gesamtwert
+  und CSV-Export
 
 > Status: Version 0.2 – im Alltag nutzbar, aber jung. Rückmeldungen und Fehlerberichte sind willkommen.
 
 ## Installation (Windows)
 
-Voraussetzungen: Windows 10/11, OBS Studio 32 oder neuer (getestet mit 32.2), NVIDIA-Grafikkarte ab RTX 20xx (Turing) mit aktuellem
-Treiber, etwa 6 GB freier Speicher.
+Voraussetzungen: Windows 10/11, OBS Studio 32 oder neuer (getestet mit 32.2), eine DirectX-12-Grafikkarte mit aktuellem
+Treiber (getestet: NVIDIA RTX 2080 SUPER; AMD und Intel laufen ebenfalls über DirectML, noch ungetestet), ohne Grafikkarte geht es langsamer auf
+der CPU –, etwa 3 GB freier Speicher.
 
 1. Aus dem [neuesten Release](https://github.com/kubilaymelnikov/tcg-card-lens/releases/latest)
    `TCGCardLens-Setup-<version>.exe` herunterladen und starten (keine Administratorrechte nötig).
    Windows SmartScreen warnt bei unsignierten Programmen: „Weitere Informationen → Trotzdem ausführen“.
 2. Auf der Seite **Spiele und Sprachen** auswählen, was erkannt werden soll und in welchen Sprachen Kartennamen
    angezeigt werden.
-3. Das Setup richtet Python, die KI-Modelle und die Kartendaten ein (einige Minuten, lädt ca. 4 GB).
+3. Das Setup richtet Python, die KI-Modelle und die Kartendaten ein (einige Minuten, lädt ca. 0,2 GB; mit `-Runtime cuda` für NVIDIA ca. 1 GB).
    Die Erkennungsdaten kommen als fertige Pakete aus dem Release; Kartenbilder werden nicht verteilt.
 4. In OBS: Rechtsklick auf deine Kamera-Quelle → **Filter** → **+** → **TCG Card Lens**.
    Die Engine startet automatisch im Hintergrund.
@@ -41,6 +47,15 @@ legen – dann installiert das Setup die Pakete daraus.
   - **↻ Drehen**, wenn eine Karte quer erkannt wurde, **⟳** neu erkennen, **✕** ausblenden.
 - Bestätigungen werden lokal als Referenz gelernt und als Trainingsbeispiele gespeichert
   (`engine/data/learned`, bleibt auf deinem Rechner).
+- **Pack-Opening:** Im Filter unter *Pack-Opening* einschalten. Jede **sicher** erkannte Karte mit Preis zählt in die
+  Session (dieselbe Karte nur einmal), ab der Hit-Schwelle gibt es den Hit-Effekt. Im Video stehen „Session-Wert“ und
+  „Letzte Hits“, im Dock der Abschnitt **Session** mit Liste, Summe, **Neue Session** und **CSV exportieren**
+  (`engine/data/sessions`). Optional wechselt OBS bei einem Hit die Szene (und nach einigen Sekunden zurück) oder
+  spielt eine Medienquelle als Sound ab. Unsichere Drucke zählen nie – kein Preis, kein Hit.
+- **Sprache der Oberfläche:** folgt der OBS-Sprache – Deutsch, wenn OBS auf Deutsch steht, sonst Englisch
+  (Filtereinstellungen, Texte im Video, Statusmeldungen, Dock, Session-Anzeige; Preise als `0,15 €` bzw. `€0.15`).
+  Dock und Session-Anzeige lassen sich mit `?lang=de` bzw. `?lang=en` an der URL festlegen. Die Sprache der
+  *Kartennamen* ist davon unabhängig (Filtereinstellung *Anzeigesprache im Overlay*).
 
 ## Wie es funktioniert
 
@@ -91,7 +106,16 @@ oder MTGJSON.
 
 ---
 
-**English (short):** OBS Studio filter that detects Pokémon, Magic: The Gathering and Yu-Gi-Oh! cards in a camera
-feed, identifies the exact print locally on an NVIDIA GPU and overlays the Cardmarket price and price history.
-Uncertain prints never show a price. A browser dock lets you confirm or correct cards; confirmations are learned
-locally. Windows installer in the releases. UI and docs are German for now. License: AGPL-3.0.
+## English
+
+OBS Studio filter that detects Pokémon, Magic: The Gathering and Yu-Gi-Oh! cards in a camera feed, identifies the
+exact print locally on your GPU (DirectML: NVIDIA, AMD, Intel) and overlays the Cardmarket price and price history. Uncertain prints never
+show a price. A browser dock lets you confirm or correct cards; confirmations are learned locally. A pack opening
+mode detects hits and keeps a session list. **The interface follows the OBS language** (German or English).
+
+**Install:** run `TCGCardLens-Setup-<version>.exe` from the
+[latest release](https://github.com/kubilaymelnikov/tcg-card-lens/releases/latest) (Windows 10/11, OBS 32+,
+a DirectX 12 GPU, ~2 GB), then in OBS add the filter **TCG Card Lens** to your camera source and add the
+dock via **Docks → Custom Browser Docks…** with the URL `http://127.0.0.1:47830/`.
+
+Full English instructions: **[README.en.md](README.en.md)**. License: AGPL-3.0.

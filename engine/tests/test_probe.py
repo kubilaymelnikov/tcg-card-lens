@@ -94,3 +94,38 @@ def test_pipeline_probe_creates_track_and_reuses_existing():
     assert res == {"found": True, "track": t.id, "how": "vorhanden"}
     assert len(p.tracker.tracks) == 1 and t.state == "new" and not t.user_rejected
     p.close()
+
+
+def test_auto_detect_off_skips_detector_but_probe_still_works():
+    class Counting(BlindDetector):
+        calls = 0
+
+        def detect(self, frame, conf=None):
+            Counting.calls += 1 if conf is None else 0  # nur reguläre Läufe zählen (Suche nutzt conf)
+            return []
+
+    img = scene_with_card(QUAD)
+    p = CardPipeline(Counting(), detect_hz=30)
+    p.auto_detect = False
+    for i in range(10):
+        p.process(img, now=0.05 * (i + 1))
+    import time
+    time.sleep(0.1)
+    assert Counting.calls == 0  # keine automatische Suche
+    res = _run_probe(p, img, point=tuple(QUAD.mean(axis=0)))
+    assert res["found"] and len(p.tracker.tracks) == 1
+    p.close()
+
+
+def test_dock_settings_are_whitelisted_and_sent_to_plugin(monkeypatch):
+    import server
+
+    sent = []
+    monkeypatch.setattr(server, "send", lambda sock, msg, lock: sent.append(msg))
+    s = server.Session.__new__(server.Session)
+    s.settings, s.sock, s.send_lock = dict(server.DEFAULT_SETTINGS), None, None
+    s.apply_settings = lambda st: s.settings.update(st)
+    assert s.patch_settings({"auto_detect": 0, "pack_enabled": 1, "engine_port": 1}) == \
+        {"auto_detect": False, "pack_enabled": True}
+    assert sent == [{"type": "settings_patch", "settings": {"auto_detect": False, "pack_enabled": True}}]
+    assert s.settings["auto_detect"] is False and s.settings["pack_enabled"] is True

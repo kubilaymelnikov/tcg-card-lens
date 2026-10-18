@@ -289,3 +289,19 @@ def test_auto_rejected_but_likely_card_is_still_asked():
     t.score, t.user_rejected = 0.95, True  # vom Nutzer verworfen → stumm
     assert _cards(_dock_with(p)) == []
     p.close()
+
+
+def test_single_detection_does_not_stay_forever_on_still_image():
+    """Einmalige Fehldetektion (z. B. Mattenkante) darf nicht als ruhender Geister-Track ewig bleiben."""
+    from cardengine.tracking import CardTracker, TrackerConfig
+
+    cfg = TrackerConfig.table()
+    cfg.lost_after_s = 1.0
+    tr = CardTracker(cfg)
+    img = scene_with_card(QUAD)
+    tr.update([Detection(order_corners(QUAD), 0.5)], 0.0)  # genau einmal gesehen
+    t = 0.0
+    for _ in range(60):  # 2 s ruhiges Bild, keine weitere Detektion
+        t += 1 / 30
+        tr.step(img, t)
+    assert tr.tracks == []

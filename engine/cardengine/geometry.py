@@ -122,10 +122,61 @@ def refine_quad_edges(gray: np.ndarray, quad: np.ndarray, search: float = 0.04, 
     return out
 
 
+def _signed_area(p: np.ndarray) -> float:
+    x, y = p[:, 0], p[:, 1]
+    return 0.5 * float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))
+
+
+def _convex_ccw(q: np.ndarray) -> np.ndarray:
+    """Konvexe Hülle, gegen den Uhrzeigersinn (mathematisch) – auch bei leicht verzerrten/vertauschten Ecken."""
+    hull = cv2.convexHull(np.asarray(q, np.float32).reshape(-1, 1, 2)).reshape(-1, 2).astype(np.float64)
+    return hull[::-1] if _signed_area(hull) < 0 else hull
+
+
+def _clip(subject: np.ndarray, clip: np.ndarray) -> np.ndarray:
+    """Sutherland-Hodgman: Schnitt des Polygons `subject` mit dem konvexen Polygon `clip` (beide gegen den
+    Uhrzeigersinn)."""
+    out = subject
+    n = len(clip)
+    for i in range(n):
+        if len(out) == 0:
+            break
+        a, b = clip[i], clip[(i + 1) % n]
+        e = b - a
+        # > 0: links der Kante = innen (gegen den Uhrzeigersinn)
+        side = e[0] * (out[:, 1] - a[1]) - e[1] * (out[:, 0] - a[0])
+        res = []
+        m = len(out)
+        for j in range(m):
+            p, q = out[j], out[(j + 1) % m]
+            sp, sq = side[j], side[(j + 1) % m]
+            if sp >= 0:
+                res.append(p)
+            if (sp >= 0) != (sq >= 0):
+                t = sp / (sp - sq)
+                res.append(p + t * (q - p))
+        out = np.array(res) if res else np.zeros((0, 2))
+    return out
+
+
 def iou_quads(a: np.ndarray, b: np.ndarray) -> float:
-    """IoU zweier konvexer Vierecke."""
-    a = np.asarray(a, dtype=np.float32)
-    b = np.asarray(b, dtype=np.float32)
-    inter, _ = cv2.intersectConvexConvex(a, b)
-    union = quad_area(a) + quad_area(b) - inter
+    """IoU zweier (konvexer) Vierecke.
+
+    Eigener Polygon-Schnitt statt cv2.intersectConvexConvex: Das liefert bei fast deckungsgleichen Vierecken
+    (Abweichungen im Bereich 1e-4 px – im Tracking alltäglich) gelegentlich eine viel zu kleine Schnittfläche.
+    """
+    a = np.asarray(a, np.float32)
+    b = np.asarray(b, np.float32)
+    # Schnelltest: umschließende Rechtecke ohne Überlappung → 0 (der häufigste Fall bei vielen Karten)
+    if (a[:, 0].max() <= b[:, 0].min() or b[:, 0].max() <= a[:, 0].min()
+            or a[:, 1].max() <= b[:, 1].min() or b[:, 1].max() <= a[:, 1].min()):
+        return 0.0
+    pa, pb = _convex_ccw(a), _convex_ccw(b)
+    area_a, area_b = _signed_area(pa), _signed_area(pb)
+    if area_a <= 0 or area_b <= 0:
+        return 0.0
+    inter_poly = _clip(pa, pb)
+    inter = _signed_area(inter_poly) if len(inter_poly) >= 3 else 0.0
+    inter = min(max(inter, 0.0), area_a, area_b)
+    union = area_a + area_b - inter
     return float(inter / union) if union > 0 else 0.0

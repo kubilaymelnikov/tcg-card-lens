@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from ..card_database.catalog import Catalog, CardRecord
+from ..i18n import Msg
 from ..geometry import RECT_H, RECT_W, rectify
 from .footer import FooterInfo, matches, parse_footer, parse_ygo_codes, ygo_asian_print, ygo_code_key, ygo_match_codes
 from .index import EmbeddingIndex
@@ -52,7 +53,7 @@ class Identity:
     similarity: float
     method: str  # embedding | embedding+ocr | gelernt
     candidates: list[str] = field(default_factory=list)  # verbleibende Drucke bei Unsicherheit ("game|id")
-    reason: str = ""
+    reason: str = ""  # i18n.Msg (Text auf Deutsch, Übersetzung erst bei der Ausgabe)
     footer_text: str = ""
     ms: float = 0.0
     price: object | None = None  # pricing.base.PriceInfo – nur bei sicherer Identifikation
@@ -183,14 +184,14 @@ class CardIdentifier:
         )
         if best_sim - other_name < self.t.name_margin:
             ident.card_id = None
-            ident.reason = "Name nicht eindeutig"
+            ident.reason = Msg("reason.name_ambiguous")
             ident.candidates = [k for k, _ in hits[:5]]
             return finish(ident)
 
         second_edition = same_name[1][1] if len(same_name) > 1 else -1.0
         if len(same_name) == 1 or best_sim - second_edition >= self.t.distinct_edition_gap:
             ident.certain = best_sim >= self.t.certain_similarity
-            ident.reason = "" if ident.certain else "geringe Ähnlichkeit"
+            ident.reason = "" if ident.certain else Msg("reason.low_similarity")
         elif self.ocr is not None:
             # Mehrere Drucke sehen gleich aus → Fußzeile lesen
             text = self.ocr.read_footer(rectify(frame, corners, turns=turns, margin=0.03))
@@ -207,11 +208,11 @@ class CardIdentifier:
             else:
                 ident.card_id = None
                 ident.candidates = [f"{r.game}|{r.id}" for r, _ in same_name]
-                ident.reason = "Fußzeile nicht eindeutig lesbar"
+                ident.reason = Msg("reason.footer_unreadable")
         else:
             ident.card_id = None
             ident.candidates = [f"{r.game}|{r.id}" for r, _ in same_name]
-            ident.reason = "mehrere Drucke, keine OCR"
+            ident.reason = Msg("reason.no_ocr")
         return finish(ident)
 
     def _identify_ygo(self, frame: np.ndarray, corners: np.ndarray, turns: int, hits: list[tuple[str, float]],
@@ -260,16 +261,16 @@ class CardIdentifier:
             return ident
 
         if matched and ygo_asian_print(ident.footer_text):
-            ident.reason = "OCG-/Asien-Druck (kein TCG-Preis)"
+            ident.reason = Msg("reason.asian_print")
             ident.candidates = [f"ygo|{r.id}" for r in matched][:MAX_CANDIDATES]
             return ident
         if matched:
             if len({r.name for r in matched}) > 1:
-                ident.reason = "Set-Code passt zu mehreren Karten"
+                ident.reason = Msg("reason.code_several_cards")
                 ident.candidates = [f"ygo|{r.id}" for r in matched][:MAX_CANDIDATES]
                 return ident
             if len(found) > 1:
-                ident.reason = "Set-Code nicht eindeutig gelesen"
+                ident.reason = Msg("reason.code_ambiguous")
                 ident.candidates = [f"ygo|{r.id}" for r in matched][:MAX_CANDIDATES]
                 return ident
             if len(matched) == 1:
@@ -281,22 +282,23 @@ class CardIdentifier:
             ident.name, ident.similarity = r.name, name_sim.get(r.name, best_sim)
             ident.set_code, ident.set_name, ident.number = r.set_code, r.set_name, r.printed_number
             ident.candidates = [f"ygo|{x.id}" for x in matched][:MAX_CANDIDATES]
-            ident.reason = f"{len(matched)} Seltenheiten mit Set-Code {r.printed_number}"
+            ident.reason = Msg("reason.rarities", n=len(matched), code=r.printed_number)
             return ident
         if not name_ok:
-            ident.reason = "Name nicht eindeutig"
+            ident.reason = Msg("reason.name_ambiguous")
             ident.candidates = [k for k, _ in hits[:5]]
             return ident
         own = [r for r in prints if r.name == best.name]
         ident.candidates = [f"ygo|{r.id}" for r in own][:MAX_CANDIDATES]
         if keys:
-            ident.reason = "gelesener Set-Code passt zu keinem Druck dieser Karte"
+            ident.reason = Msg("reason.code_no_print")
         elif not own:
-            ident.reason = "kein TCG-Druck bekannt"
+            ident.reason = Msg("reason.no_tcg_print")
         elif len(own) == 1:
             take(own[0], "embedding")
             ident.certain = best_sim >= self.t.certain_similarity
-            ident.reason = "" if ident.certain else "geringe Ähnlichkeit"
+            ident.reason = "" if ident.certain else Msg("reason.low_similarity")
         else:
-            ident.reason = f"Set-Code nicht lesbar ({len(own)} Drucke)" if self.ocr is not None else "mehrere Drucke, keine OCR"
+            ident.reason = (Msg("reason.code_unreadable", n=len(own)) if self.ocr is not None
+                            else Msg("reason.no_ocr"))
         return ident

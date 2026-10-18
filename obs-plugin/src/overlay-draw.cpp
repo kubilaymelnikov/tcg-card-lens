@@ -62,6 +62,7 @@ void OverlayDrawer::set_result(const ResultFrame &r, float sx, float sy)
 		s.thickness = t.thickness;
 		s.label = t.label;
 		s.highlight = t.highlight;
+		s.hit = t.hit;
 		s.panels = t.panels;
 	}
 	for (auto it = tracks_.begin(); it != tracks_.end();)
@@ -245,7 +246,16 @@ void OverlayDrawer::draw(uint32_t w, uint32_t h, const OverlayStyle &style)
 			s.display[i] += (s.target[i] - s.display[i]) * a; // Glättung bei voller Bildrate
 		const float card_w = std::hypot(s.display[2] - s.display[0], s.display[3] - s.display[1]);
 		const float base = std::max(2.f, s.thickness * card_w / 250.f);
-		if (s.highlight) {
+		if (s.hit) {
+			// Pack-Opening-Hit: goldener Rahmen, pulsiert schneller (~3 Hz) und breiter als die Hervorhebung,
+			// mit weichem goldenem Schein (zwei halbtransparente Lagen)
+			const float hp = 2.5f + 1.f * float(std::sin(2.0 * kPi * 3.0 * t_sec));
+			const float th = base * hp;
+			const std::array<float, 3> gold{1.f, 200.f / 255.f, 40.f / 255.f};
+			draw_quad_outline(s.display, th + std::max(18.f, base * 6.f), gold, 0.18f);
+			draw_quad_outline(s.display, th + std::max(8.f, base * 3.f), gold, 0.35f);
+			draw_quad_outline(s.display, th, gold);
+		} else if (s.highlight) {
 			const float th = base * pulse;
 			// heller, halbtransparenter Außenschein unter dem Rahmen
 			draw_quad_outline(s.display, th + std::max(6.f, base * 2.f), {1.f, 1.f, 1.f}, 0.35f);
@@ -279,10 +289,25 @@ void OverlayDrawer::draw(uint32_t w, uint32_t h, const OverlayStyle &style)
 	}
 	for (const auto &cp : corner_panels)
 		draw_texture(*cp.tex, cp.x, cp.y, panel_scale_);
+	// Bildschirm-Panels: je Position (pos) in Reihenfolge gestapelt – oben nach unten, unten nach oben
+	constexpr float kMargin = 10.f;
+	std::map<std::string, float> stack; // pos -> bereits belegte Höhe
 	for (const auto &p : screen_panels_) {
 		auto it = textures_.find(p.key);
-		if (it != textures_.end() && it->second.tex)
-			draw_texture(it->second, 10.f, float(h) - it->second.h * panel_scale_ - 10.f, panel_scale_);
+		if (it == textures_.end() || !it->second.tex)
+			continue;
+		const std::string pos = p.pos.empty() ? "bottom_left" : p.pos;
+		const float pw = it->second.w * panel_scale_, ph = it->second.h * panel_scale_;
+		float &used = stack[pos];
+		const bool top = pos.rfind("top", 0) == 0;
+		float x = kMargin;
+		if (pos == "top_center")
+			x = (float(w) - pw) / 2.f;
+		else if (pos == "top_right" || pos == "bottom_right")
+			x = float(w) - pw - kMargin;
+		const float y = top ? kMargin + used : float(h) - kMargin - used - ph;
+		used += ph + 8.f;
+		draw_texture(it->second, std::max(0.f, x), std::max(0.f, y), panel_scale_);
 	}
 	gs_blend_state_pop();
 }

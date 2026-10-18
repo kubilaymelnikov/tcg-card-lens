@@ -17,6 +17,27 @@ OBS ──(Filter, TCP 47820)──► Engine ◄──(HTTP 47830, JSON)── 
   Dock offen ist, also in den letzten 5 s abgefragt hat), `always` oder `never`.
 - Fährt man im Dock über eine Karte, wird sie im Video **hervorgehoben** (pulsierender, dickerer Rahmen).
 
+## Sprache (Deutsch/Englisch)
+
+Dock und Session-Anzeige folgen der **OBS-Sprache**: Das Plugin meldet `obs_get_locale()` als `ui_language`
+(docs/PLUGIN.md), `/api/state` liefert daraus je Sitzung `ui_language` (`"de"`/`"en"`) und `ui_locale` (Rohwert,
+z. B. `"en-US"`, bei alten Plugins `"de"`) sowie global `ui_language` = Sprache der ersten Sitzung (`null` ohne
+Sitzung). Deutsch, wenn die Locale mit `de` beginnt, sonst Englisch.
+
+- **`?lang=de|en`** an der Dock- bzw. Session-URL legt die Sprache fest (z. B. `http://127.0.0.1:47830/?lang=en`).
+  Ohne Angabe nimmt das Dock die Sprache aus `/api/state`; solange keine Quelle verbunden ist, die zuletzt benutzte
+  (localStorage `tcl.dock.lang`), sonst die Browser-Sprache.
+- Alle Texte stehen in einem Wörterbuch im Script (`I18N` in dock.html, `TEXT` in session.html); `<html lang>`,
+  Preise, Prozente und Uhrzeiten richten sich nach der Sprache (`Intl` mit `de-DE` bzw. `en-US`).
+- Das Dock hängt seine Sprache als `?lang=` an alle Anfragen (`/api/state`, POSTs, CSV-Download). Die Engine liefert
+  damit Gründe (`reason`), `status`, „Unbekannte Karte“ und Fehlermeldungen (`error`) in dieser Sprache; ohne
+  `lang` gilt die Sprache der Sitzung. Auch `"lang"` im POST-Body wird akzeptiert.
+- Wechselt die Sprache (z. B. OBS-Sprache umgestellt), setzt das Dock alle Texte neu; Kacheln, mit denen gerade
+  gearbeitet wird, bleiben eingefroren (Inhalt, Suchtext, Fokus und Position bleiben – nur die Beschriftung wechselt).
+- Die CSV folgt ebenfalls der Sprache (siehe unten). Die Sprache der **Kartennamen** ist davon unabhängig
+  (Filtereinstellung „Anzeigesprache“, `display_language`).
+- Mock: `python tools/dock_mock.py --lang en` (bzw. `en-US`, `de`) simuliert die OBS-Sprache.
+
 ## HTTP-API (alles JSON, UTF-8)
 
 ### `GET /api/state`
@@ -25,13 +46,16 @@ Polling alle ~500 ms. Antwort:
 ```json
 {
   "engine": "0.2.0",
-  "status": "bereit",
+  "status": "bereit",                   // in der Sprache der Anfrage (?lang=) bzw. der ersten Sitzung
+  "ui_language": "de",                  // Sprache der Oberfläche (erste Sitzung), null ohne Sitzung
   "learned": {"references": 12, "negatives": 3, "dataset": 15},
   "dock_rev": "1792233686",             // ändert sich mit dock.html → Dock lädt sich selbst neu
   "sessions": [
     {
       "id": "s1",                       // Sitzungs-ID (eine je OBS-Filterinstanz)
       "source": "Kamera Tisch",
+      "ui_language": "de",              // "de" | "en" – aus der OBS-Sprache dieser Filterinstanz
+      "ui_locale": "de-DE",             // Rohwert vom Plugin
       "highlight": "B",                 // aktuell hervorgehobenes Kennzeichen oder null
       "cards": [
         {
@@ -46,7 +70,7 @@ Polling alle ~500 ms. Antwort:
           "set_name": "151", "set_code": "MEW", "number": "025/165",
           "similarity": 0.81,
           "method": "embedding",        // embedding | embedding+ocr | gelernt | bestätigt
-          "reason": "geringe Ähnlichkeit",
+          "reason": "geringe Ähnlichkeit",  // übersetzt (en: "low similarity")
           "image": "/api/card-image/pokemon/sv3pt5-25",   // Referenzbild aus den lokalen Daten
           "crop": "/api/crop/s1/17?v=3",                  // aktueller Kamera-Ausschnitt (entzerrt, JPEG)
           "cardmarket_url": "https://www.cardmarket.com/de/Pokemon/Products?idProduct=123456",
@@ -158,3 +182,68 @@ Body: `{"session", "x", "y"}` (Klickpunkt, normiert 0..1) **oder** `{"session", 
 `how`: `detektor` (gezielte Suche im vergrößerten Ausschnitt), `kontur` (klassische Kantensuche), `rahmen`
 (aufgezogener Rahmen, an die Kartenkanten angepasst), `vorhanden` (an der Stelle lag schon eine Karte – sie wird neu
 erkannt). Gefundene Karten werden normal verfolgt und identifiziert und erscheinen danach im Dock.
+
+## Pack-Opening-Session
+
+Ist im Filter der Pack-Opening-Modus an (siehe [PLUGIN.md](PLUGIN.md#pack-opening-modus)), zeigt das Dock den
+Abschnitt **Session**: Gesamtwert, Anzahl Karten und Hits, Startzeit, darunter die Liste (neueste zuerst; Zeit,
+Name, Set/Nummer, Preis, ★ für Hits, ✕ zum Entfernen falsch gezählter Einträge) und die Knöpfe **Neue Session**
+(zweiter Klick bestätigt – JS-Dialoge sind in OBS-Browser-Docks nicht verlässlich), **CSV exportieren** (speichert
+in der Engine) und **⤓** (Download im Browser). Bei mehreren Quellen folgt der Abschnitt der Quellenauswahl im Kopf.
+
+### `GET /api/state` (Erweiterung je Sitzung)
+
+```json
+"pack": {
+  "enabled": true,                 // Modus im Filter an (aus: Liste bleibt sichtbar, es wird nicht weiter gezählt)
+  "started": 1792233600.0,         // Unix-Zeit des Session-Starts
+  "threshold": 10.0,
+  "total": 213.4, "count": 12, "hits": 2,
+  "csv": "/api/pack/csv/s1",
+  "cards": [                       // neueste zuerst
+    {"id": 41, "track": 17, "key": "pokemon|sv3pt5-6", "game": "pokemon", "name": "Glurak ex",
+     "set_name": "151", "number": "006/165", "time": 1792233710.2, "price": 168.73, "currency": "EUR",
+     "variant": "normal", "hit": true, "image": "/api/card-image/pokemon/sv3pt5-6"}
+  ]
+}
+```
+
+`pack` ist `null`, wenn der Modus aus ist und für die Quelle noch nichts gesammelt wurde. `price` ist `null`, wenn
+die Karte keinen Cardmarket-Preis hat. Gezählt werden nur sicher erkannte Karten; dieselbe physische Karte
+(Track-ID + Kartenschlüssel) einmal.
+
+### `POST` (Body JSON, Antwort `{"ok": true, …}` oder `{"ok": false, "error": "…"}`)
+
+| Pfad | Body | Wirkung |
+|---|---|---|
+| `/api/pack/reset` | `{"session"}` | Neue Session. Eine nicht leere alte Session wird vorher als CSV gesichert; Antwort `{"ok": true, "saved": "<pfad>" \| null}`. |
+| `/api/pack/export` | `{"session"}` | CSV unter `engine/data/sessions/<Quelle>/<JJJJ-MM-TT_hhmmss>.csv` speichern (Startzeit der Session; gleicher Start = Datei wird überschrieben). Antwort `{"ok": true, "path": "…"}`; leere Session → Fehler. |
+| `/api/pack/remove` | `{"session", "entry"}` | Eintrag (`cards[].id`) entfernen. Meldet derselbe Track die Karte danach erneut, zählt sie wieder. |
+
+### `GET /api/pack/csv/<session>`
+Download der aktuellen Session (`text/csv`, `Content-Disposition: attachment`); `?lang=de|en` wählt das Format,
+sonst die Sprache der Sitzung (gilt ebenso für `/api/pack/export` und die Sicherung bei `/api/pack/reset`).
+
+**CSV-Format Deutsch** (für deutsches Excel): UTF-8 mit BOM, Trennzeichen `;`, Dezimalkomma, Zeilenende CRLF, eine Kopfzeile:
+
+```
+Zeit;Spiel;Karte;Set;Nummer;Variante;Preis;Währung;Hit;Schlüssel
+2026-10-17 20:15:03;Pokémon;Glurak ex;151;006/165;normal;168,73;EUR;ja;pokemon|sv3pt5-6
+```
+
+`Preis` ist leer, wenn kein Preis vorliegt; `Hit` ist `ja` oder leer.
+
+**Englisch:** Trennzeichen `,`, Dezimalpunkt, Kopfzeile `Time,Game,Card,Set,Number,Variant,Price,Currency,Hit,Key`,
+`Hit` ist `yes` oder leer.
+
+## Session-Anzeige (Pack-Opening) als eigene Szenen-Quelle
+
+`http://127.0.0.1:47830/session` – eine Seite mit transparentem Hintergrund für eine **OBS-Browser-Quelle**: Session-Wert,
+Kartenanzahl, letzte Hits und eine Hit-Animation (Banner + Leuchten). Frei in jeder Szene platzierbar, skalierbar und
+zuschneidbar. Am einfachsten über den Knopf **„Session-Anzeige zur aktuellen Szene hinzufügen“** in der Filtergruppe
+„Pack-Opening“ – der legt die Browser-Quelle mit der richtigen Adresse an.
+
+URL-Parameter: `source=<Quelle mit dem Filter>` (ohne: erste Quelle mit aktivem Pack-Opening), `show=total,hits,count`,
+`hits=3`, `scale=1`, `align=left|right`, `bg=0|1` (halbtransparente Kästen), `lang=de|en` (Standard: Sprache der
+Quelle, d. h. OBS-Sprache). Die Seite fragt `/api/state?overlay=1` ab –
+`overlay=1` zählt nicht als „Dock offen“, die Kennzeichen A, B … erscheinen dadurch nicht im Video.
