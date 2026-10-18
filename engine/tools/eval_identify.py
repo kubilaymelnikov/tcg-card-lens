@@ -2,6 +2,7 @@
 Unschärfe, Rauschen, Glanz, dunkles Licht), dann entzerrt und gesucht.
 
     python tools/eval_identify.py --game pokemon --n 500
+    python tools/eval_identify.py --game pokemon --n 500 --backend onnx --no-build   # Backends vergleichen, nur lesen
     python tools/eval_identify.py --frames data/labeled   # echte Kamerabilder mit Label-Datei (Phase 1b)
 
 Hinweis: Synthetische Abfragen stammen aus denselben Referenzbildern wie der Index → Werte sind optimistisch.
@@ -69,18 +70,24 @@ def main():
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--model", default="occ-dinov3s")
     ap.add_argument("--pipeline", action="store_true", help="komplette Identifikation inkl. OCR und Unsicherheitslogik")
+    ap.add_argument("--backend", choices=["auto", "onnx", "torch"], help="Embedder über ONNX Runtime oder PyTorch")
+    ap.add_argument("--no-build", action="store_true",
+                    help="Index nie neu aufbauen (nur lesen); Karten ohne Vektor werden übersprungen")
     args = ap.parse_args()
     rng = random.Random(args.seed)
     np.random.seed(args.seed)
 
-    emb = Embedder(args.model)
-    migrate_legacy(emb.index_name)
-    index = EmbeddingIndex.load(emb.index_name) if available_games(emb.index_name) else build_index(emb)
+    emb = Embedder(args.model, backend=args.backend)
+    print(f"Embedder: {emb.backend} ({emb.device})", flush=True)
+    if not args.no_build:
+        migrate_legacy(emb.index_name)
+    index = EmbeddingIndex.load(emb.index_name) if args.no_build or available_games(emb.index_name) else build_index(emb)
     missing = [r for r in Catalog().all(args.game) if os.path.exists(r.image_path) and index.vector(f"{r.game}|{r.id}") is None]
-    if missing:
+    if missing and not args.no_build:
         index = build_index(emb)
     cat = Catalog()
-    recs = [r for r in cat.all(args.game) if os.path.exists(r.image_path)]
+    recs = [r for r in cat.all(args.game) if os.path.exists(r.image_path)
+            and (not args.no_build or index.vector(f"{r.game}|{r.id}") is not None)]
     sample = rng.sample(recs, min(args.n, len(recs)))
     by_key = {f"{r.game}|{r.id}": r for r in cat.all(args.game)}
 

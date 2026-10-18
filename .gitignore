@@ -4,6 +4,8 @@ node_modules/
 
 # Engine: Laufzeitdaten, Modelle, Python-Umgebung (werden lokal erzeugt / geladen)
 engine/.venv/
+engine/.venv-*/
+engine/models-onnx/
 engine/data/
 engine/models/
 __pycache__/

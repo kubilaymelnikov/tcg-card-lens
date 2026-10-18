@@ -158,6 +158,9 @@ class Shared:
             det.base.conf = 0.2
             self.detector = Locked(det, self.lock)
             identifier = CardIdentifier.load_default(games=games)
+            emb = identifier.embedder
+            print(f"[engine] Backend {emb.backend}: Detektor {getattr(det.base, 'provider', 'PyTorch')}, "
+                  f"Embedder {emb.device}", flush=True)
             try:
                 from cardengine.learning import LearnedStore
 

@@ -23,12 +23,15 @@ MARGIN = 0.03
 
 
 class FooterOcr:
-    def __init__(self, use_cuda: bool = True):
+    def __init__(self, use_gpu: bool = True):
+        """`use_gpu`: CUDA bzw. DirectML, je nach installiertem onnxruntime-Paket (cardengine.backend.ocr_flags)."""
         from rapidocr import RapidOCR
 
+        from ..backend import ocr_flags
+
         params = {"Global.log_level": "error"}
-        if use_cuda:
-            params["EngineConfig.onnxruntime.use_cuda"] = True
+        if use_gpu:
+            params.update(ocr_flags())
         try:
             self.engine = RapidOCR(params=params)
         except Exception:

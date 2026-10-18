@@ -1,9 +1,11 @@
-"""Bild-Embeddings für entzerrte Karten. Austauschbare Modelle:
+"""Bild-Embeddings für entzerrte Karten. Backend ONNX Runtime (Standard) oder PyTorch, siehe cardengine.backend.
+Austauschbare Modelle:
 
 - `occ-dinov3s` (Standard): matteot11/collector-mtg-pkm-embedder-dinov3-small – DINOv3-S, auf Magic- und
   Pokémon-Karten kontrastiv nachtrainiert (Open Card Collector, MIT-Code; Gewichte unter DINOv3-Lizenz).
 - `dinov2s`: DINOv2 ViT-S/14 ohne Kartentraining (Apache-2.0) – nur Basislinie.
 - `hf:<model-id>`: beliebiges Hugging-Face-Bildmodell (CLS-Token).
+Mit ONNX gibt es nur `occ-dinov3s` (exportiert mit tools/export_onnx.py); die anderen brauchen PyTorch.
 """
 from __future__ import annotations
 
@@ -51,13 +53,67 @@ def _preprocess_224(bgr_cards: list[np.ndarray]) -> np.ndarray:
     return out
 
 
+def _preprocess_dinov3(bgr_cards: list[np.ndarray]) -> np.ndarray:
+    """Wie `DINOv3ViTImageProcessor` (Transformers, Torchvision-Weg): erst auf 0..1 skalieren, dann bilinear mit
+    Antialiasing auf 224 × 224, dann normieren. Pillow im Gleitkomma-Modus („F“) rechnet dasselbe Filter wie
+    Torchvision (Abweichung < 1e-4), deshalb ohne PyTorch."""
+    from PIL import Image
+
+    out = np.empty((len(bgr_cards), 3, 224, 224), np.float32)
+    for i, img in enumerate(bgr_cards):
+        f = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32) * np.float32(1 / 255)
+        for c in range(3):
+            ch = Image.fromarray(np.ascontiguousarray(f[..., c]), mode="F").resize((224, 224), Image.BILINEAR)
+            out[i, c] = (np.asarray(ch, np.float32) - MEAN[c]) / STD[c]
+    return out
+
+
+# ONNX-Export je Modell (models_fetch.ONNX_MODELS); andere Modelle nur mit dem PyTorch-Backend
+ONNX_KIND = {"occ-dinov3s": "embedder"}
+
+
 class Embedder:
-    def __init__(self, model: str = DEFAULT_MODEL, device: str | None = None, normalize: bool = True):
-        import torch
+    """Bild-Embeddings; Backend „onnx“ (ONNX Runtime) oder „torch“ (siehe cardengine.backend).
+    Beide liefern für `occ-dinov3s` gleichwertige Vektoren (Kosinus ≥ 0,999) – derselbe Indexname, dieselben
+    Datenpakete."""
+
+    def __init__(self, model: str = DEFAULT_MODEL, device: str | None = None, normalize: bool = True,
+                 backend: str | None = None, provider: str | None = None):
+        from ..backend import resolve_backend
 
         self.normalize = normalize
-        self.torch = torch
         self.name = model
+        self.backend = resolve_backend(backend)
+        if self.backend == "onnx":
+            self._init_onnx(model, provider)
+        else:
+            self._init_torch(model, device)
+
+    # ------------------------------------------------------------ ONNX
+    def _init_onnx(self, model: str, provider: str | None) -> None:
+        from ..backend import OnnxRunner
+        from ..models_fetch import onnx_path
+
+        if model not in ONNX_KIND:
+            raise ValueError(f"Embedding-Modell {model!r} gibt es nur mit dem PyTorch-Backend (TCGLENS_BACKEND=torch)")
+        self.runner = OnnxRunner(onnx_path(ONNX_KIND[model]), provider)
+        self.device = self.runner.provider
+
+    def _embed_onnx(self, bgr: list[np.ndarray]) -> np.ndarray:
+        if self.normalize:
+            bgr = [normalize_photometric(b) for b in bgr]
+        x = _preprocess_dinov3(bgr)
+        if self.runner.fixed_shapes:  # DirectML: Einzelbilder mit fester Form statt dynamischer Stapel (schneller)
+            f = np.concatenate([self.runner.run(x[i:i + 1])[0] for i in range(len(x))]).astype(np.float32)
+        else:
+            f = self.runner.run(x)[0].astype(np.float32)
+        return f / np.maximum(np.linalg.norm(f, axis=1, keepdims=True), 1e-12)
+
+    # ------------------------------------------------------------ PyTorch
+    def _init_torch(self, model: str, device: str | None) -> None:
+        import torch
+
+        self.torch = torch
         spec = MODELS.get(model, model)
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         os.environ.setdefault("HF_HOME", os.path.join(MODELS_DIR, "hf"))
@@ -103,6 +159,9 @@ class Embedder:
 
     def embed(self, bgr_cards: list[np.ndarray], batch: int = 64) -> np.ndarray:
         """L2-normalisierte Embeddings (N, D) float32."""
+        if self.backend == "onnx":
+            chunks = [self._embed_onnx(bgr_cards[i:i + batch]) for i in range(0, len(bgr_cards), batch)]
+            return np.concatenate(chunks) if chunks else np.zeros((0, 1), np.float32)
         torch = self.torch
         chunks = []
         with torch.inference_mode():

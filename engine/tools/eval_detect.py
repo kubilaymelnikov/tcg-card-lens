@@ -3,6 +3,7 @@ plus optional echte Kamerabilder (nur Laufzeit + Sichtprüfung, da ohne Label).
 
     python tools/eval_detect.py --n 200
     python tools/eval_detect.py --n 200 --images data/frames --save-vis data/vis
+    python tools/eval_detect.py --n 200 --detectors occ-yolo11n-obb --backend onnx   # Backends vergleichen
 """
 from __future__ import annotations
 
@@ -25,8 +26,9 @@ from synth import load_card_paths, make_sample  # noqa: E402
 
 DETECTORS = {
     "classical": lambda: ClassicalDetector(),
-    "occ-yolo11n-obb": lambda: __import__("cardengine.detection.yolo_obb", fromlist=["x"]).YoloObbDetector(
-        os.path.join(HERE, "models", "occ", "detector-yolo11n-obb.pt"), imgsz=640, conf=0.4),
+    # ONNX oder PyTorch je nach --backend bzw. TCGLENS_BACKEND (cardengine.backend)
+    "occ-yolo11n-obb": lambda: __import__("cardengine.detection.yolo_obb", fromlist=["x"]).create_obb_detector(
+        conf=0.4, imgsz=640),
     "occ-yolo11n-obb+refine": lambda: __import__("cardengine.detection.refine", fromlist=["x"]).RefinedDetector(
         DETECTORS["occ-yolo11n-obb"]()),
     "cardstream-rfdetr-seg": lambda: __import__("cardengine.detection.rfdetr_seg", fromlist=["x"]).RfDetrSegDetector(
@@ -47,7 +49,10 @@ def main():
     ap.add_argument("--detectors", default=",".join(DETECTORS))
     ap.add_argument("--images", help="Ordner mit echten Kamerabildern (nur Laufzeit/Sichtprüfung)")
     ap.add_argument("--save-vis")
+    ap.add_argument("--backend", choices=["auto", "onnx", "torch"], help="YOLO-OBB über ONNX Runtime oder PyTorch")
     args = ap.parse_args()
+    if args.backend:
+        os.environ["TCGLENS_BACKEND"] = args.backend
 
     rng = random.Random(args.seed)
     np.random.seed(args.seed)

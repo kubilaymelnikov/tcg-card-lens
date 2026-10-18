@@ -26,22 +26,27 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 FRAMES_DIR = os.path.join(HERE, "data", "frames")
 
 
-DEFAULT_DETECTOR = os.path.join(HERE, "models", "occ", "detector-yolo11n-obb.pt")
+DEFAULT_DETECTOR = os.path.join(HERE, "models", "occ", "detector-yolo11n-obb.pt")  # PyTorch-Gewichte (Entwicklung)
 
 
 def build_detector(name: str):
     if name == "classical":
         return ClassicalDetector()
     if name == "default":
+        # YOLO11n-OBB über ONNX Runtime oder PyTorch (je nach Backend, siehe cardengine.backend)
         from cardengine.detection.refine import RefinedDetector
-        from cardengine.detection.yolo_obb import YoloObbDetector
+        from cardengine.detection.yolo_obb import create_obb_detector
 
-        return RefinedDetector(YoloObbDetector(DEFAULT_DETECTOR, imgsz=640, conf=0.4))
+        return RefinedDetector(create_obb_detector(conf=0.4, imgsz=640))
     if name == "rfdetr":
         from cardengine.detection.rfdetr_seg import RfDetrSegDetector
 
         return RfDetrSegDetector(os.path.join(HERE, "models", "cardstream", "segmentation_model", "onnx", "model.onnx"))
-    if name.endswith(".onnx") or name.endswith(".pt"):
+    if name.endswith(".onnx"):
+        from cardengine.detection.yolo_obb import OnnxObbDetector
+
+        return OnnxObbDetector(name)
+    if name.endswith(".pt"):
         from cardengine.detection.yolo_obb import YoloObbDetector
 
         return YoloObbDetector(name)
