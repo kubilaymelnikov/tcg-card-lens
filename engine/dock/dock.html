@@ -357,8 +357,7 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
   <div class="hrow ctrl modes" id="modes" hidden>
     <label class="sw" title="Aus: Der Kartenfinder sucht nicht selbst – Karten nur gezielt per Klick oder Rahmen im Kamerabild" data-i18n-title="auto_title"><input type="checkbox" id="sw-auto"><span class="knob"></span><span data-i18n="auto">Automatisch erkennen</span></label>
     <label class="sw" title="Hits erkennen, Session-Wert zählen (Pack-Opening)" data-i18n-title="pack_title"><input type="checkbox" id="sw-pack"><span class="knob"></span><span data-i18n="pack">Pack-Opening</span></label>
-    <span id="thr-wrap" hidden><span data-i18n="hit_from">Hit ab</span> <input type="number" id="pack-thr" min="0.01" step="0.05" aria-label="Hit-Schwelle in Euro" data-i18n-aria="thr_aria"> €
-      <button type="button" class="btn sm" id="hd-reset" data-i18n-title="new_session_title" title="Liste leeren und neu zählen (eine nicht leere Session wird vorher als CSV gesichert)">↺ <span data-i18n="new_session">Neue Session</span></button></span>
+    <span id="thr-wrap" hidden><span data-i18n="hit_from">Hit ab</span> <input type="number" id="pack-thr" min="0.01" step="0.05" aria-label="Hit-Schwelle in Euro" data-i18n-aria="thr_aria"> €</span>
   </div>
 </header>
 <div class="offline" id="offline" hidden data-i18n="offline">Engine nicht erreichbar – startet OBS-Filter? Neuer Versuch läuft …</div>
@@ -715,7 +714,6 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
     dot: $('dot'), status: $('status'), learned: $('learned'), srcWrap: $('src-wrap'), src: $('src'),
     unsure: $('unsure'), offline: $('offline'), main: $('main'),
     modes: $('modes'), swAuto: $('sw-auto'), swPack: $('sw-pack'), thrWrap: $('thr-wrap'), thr: $('pack-thr'),
-    hdReset: $('hd-reset'),
     secConfirm: $('sec-confirm'), gridConfirm: $('grid-confirm'), cntConfirm: $('cnt-confirm'),
     secSeen: $('sec-seen'), gridSeen: $('grid-seen'), cntSeen: $('cnt-seen'), emptySeen: $('empty-seen')
   };
@@ -1479,36 +1477,6 @@ footer { color: var(--dim); font-size: 11px; padding: 8px 8px 12px; border-top: 
   ui.swPack.addEventListener('change', function () {
     sendModes({ pack_enabled: ui.swPack.checked }, T(ui.swPack.checked ? 'pack_on' : 'pack_off_toast'));
   });
-  // Neue Session direkt im Kopf (wie der Knopf im Abschnitt „Session“: bei vorhandenen Karten zweiter Klick nötig)
-  var hdLabelHtml = ui.hdReset.innerHTML;
-  function hdLabel() {  // Beschriftung in der aktuellen Sprache wiederherstellen
-    ui.hdReset.innerHTML = hdLabelHtml;
-    var sp = ui.hdReset.querySelector('[data-i18n]'); if (sp) setText(sp, T('new_session'));
-    return ui.hdReset.innerHTML;
-  }
-  ui.hdReset.addEventListener('click', function () {
-    var targets = modeTargets();
-    if (!targets.length) return;
-    var count = targets.reduce(function (n, x) { return n + ((x.pack && x.pack.count) || 0); }, 0);
-    if (count && !ui.hdReset._armed) {
-      ui.hdReset._armed = true;
-      ui.hdReset.textContent = T('really_new');
-      ui.hdReset.classList.add('danger');
-      setTimeout(function () {
-        ui.hdReset._armed = false; hdLabel(); ui.hdReset.classList.remove('danger');
-      }, 3000);
-      return;
-    }
-    ui.hdReset._armed = false; hdLabel(); ui.hdReset.classList.remove('danger');
-    ui.hdReset.disabled = true;
-    Promise.all(targets.map(function (x) { return post('/api/pack/reset', { session: x.id }); })).then(function (rs) {
-      var saved = rs.map(function (r) { return r && r.saved; }).filter(Boolean);
-      toast(saved.length ? T('new_session_saved', { path: saved.join(', ') }) : T('new_session_started'), 'ok');
-      ui.hdReset.disabled = false;
-      pollNow();
-    }, function (err) { toast(String(err && err.message || err), 'err'); ui.hdReset.disabled = false; });
-  });
-
   ui.thr.addEventListener('change', function () {
     var v = parseFloat(String(ui.thr.value).replace(',', '.'));
     if (!(v >= 0.01)) { toast(T('thr_min', { v: money(0.01, 'EUR') }), 'err'); renderModes(); return; }
